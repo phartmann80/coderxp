@@ -1,4 +1,4 @@
-import { MessageSquare, Github, Mail, ShieldCheck, ArrowRight } from "lucide-react";
+import { MessageSquare, Github, ArrowRight } from "lucide-react";
 
 export default function ContactPage() {
   return (
@@ -39,18 +39,15 @@ export default function ContactPage() {
         {/* Support Card 2 */}
         <div className="p-6 rounded-xl glass-panel space-y-4">
           <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify-center text-accent-emerald">
-            <Mail className="w-5 h-5" />
+            <MessageSquare className="w-5 h-5" />
           </div>
           <h3 className="text-base font-semibold text-white">Developer Support</h3>
           <p className="text-xs text-gray-400 leading-relaxed">
             Direct communication channel for technical team inquiries and BYOK integration guidance.
           </p>
-          <a
-            href="mailto:support@coderxp.pro"
-            className="inline-flex items-center gap-1.5 text-xs text-accent-emerald font-mono hover:underline pt-2"
-          >
-            support@coderxp.pro <ArrowRight className="w-3.5 h-3.5" />
-          </a>
+          <span className="inline-flex items-center gap-1.5 text-xs text-accent-emerald font-mono pt-2">
+            Support channel coming soon
+          </span>
         </div>
 
       </div>

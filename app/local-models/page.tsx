@@ -1,4 +1,4 @@
-import { Cpu, Server, Shield, AlertTriangle, Code2 } from "lucide-react";
+import { Cpu, Server, AlertTriangle, Code2 } from "lucide-react";
 
 export default function LocalModelsPage() {
   return (
@@ -21,7 +21,7 @@ export default function LocalModelsPage() {
           <AlertTriangle className="w-4 h-4" /> Hosted Server vs Local Environment Scope
         </div>
         <p className="text-gray-400 leading-relaxed">
-          When CoderXP runs as a web app, <code className="text-gray-200">http://localhost:11434</code> refers to the user&apos;s computer, not the hosting web server. CoderXP bridges this network boundary securely without exposing private local networks.
+          When CoderXP runs as a web app, <code className="text-gray-200">http://localhost:11434</code> refers to the user&apos;s computer, not the hosting web server. CoderXP is designing a secure bridge for this network boundary. The local-model connection remains an architecture proposal and is not yet available.
         </p>
       </div>
 
@@ -32,7 +32,7 @@ export default function LocalModelsPage() {
             <Code2 className="w-5 h-5 text-accent-cyan" /> Option A: Browser-Direct CORS Connection
           </h3>
           <p className="text-xs text-gray-300 leading-relaxed">
-            The browser executes client-side <code className="text-accent-cyan font-mono">fetch()</code> directly to <code className="text-gray-200 font-mono">http://localhost:11434</code>. Requires setting <code className="text-gray-200 font-mono">OLLAMA_ORIGINS=&quot;https://coderxp.pro&quot;</code> to grant explicit CORS permission.
+            The browser would execute client-side <code className="text-accent-cyan font-mono">fetch()</code> directly to <code className="text-gray-200 font-mono">http://localhost:11434</code>. This would require setting <code className="text-gray-200 font-mono">OLLAMA_ORIGINS=&quot;https://coderxp.pro&quot;</code> to grant explicit CORS permission. This option is proposed but not yet implemented.
           </p>
         </div>
 
@@ -41,7 +41,7 @@ export default function LocalModelsPage() {
             <Server className="w-5 h-5 text-accent-emerald" /> Option B: Secure Local Bridge CLI Daemon
           </h3>
           <p className="text-xs text-gray-300 leading-relaxed">
-            A lightweight open-source CLI utility (<code className="text-emerald-400 font-mono">coderxp-bridge</code>) creates a token-authenticated local WebSocket tunnel with user consent verification.
+            A lightweight open-source CLI utility (<code className="text-emerald-400 font-mono">coderxp-bridge</code>) would create a token-authenticated local WebSocket tunnel with user consent verification. This is an architecture proposal, not yet implemented.
           </p>
         </div>
 
@@ -50,7 +50,7 @@ export default function LocalModelsPage() {
             <Cpu className="w-5 h-5 text-accent-amber" /> Option C: Local-First Desktop Edition
           </h3>
           <p className="text-xs text-gray-300 leading-relaxed">
-            Tauri / Electron packaging for native zero-CORS local IPC communication.
+            Tauri / Electron packaging for native zero-CORS local IPC communication. This is a planned future option, not yet in development.
           </p>
         </div>
       </div>

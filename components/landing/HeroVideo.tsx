@@ -13,7 +13,7 @@ interface HeroVideoProps {
 export function HeroVideo({
   desktopSrc = "/video/coderxp-hero-desktop.mp4",
   mobileSrc = "/video/coderxp-hero-mobile.mp4",
-  posterSrc = "/images/coderxp-hero-poster.webp",
+  posterSrc = "/images/coderxp-hero-poster.jpg",
 }: HeroVideoProps) {
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [videoError, setVideoError] = useState(false);

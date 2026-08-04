@@ -106,9 +106,9 @@ export default function HomePage() {
             <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify-center text-accent-cyan">
               <Terminal className="w-5 h-5" />
             </div>
-            <h3 className="text-lg font-semibold text-white">Real Terminal Execution</h3>
+            <h3 className="text-lg font-semibold text-white">Real Terminal Execution <span className="text-xs text-gray-500 font-normal">(Planned)</span></h3>
             <p className="text-xs text-gray-400 leading-relaxed">
-              No simulated installation bars or fake command logs. Real execution output directly from isolated execution containers.
+              No simulated installation bars or fake command logs. Authentic execution output directly from isolated execution containers is a core goal of the roadmap.
             </p>
             <div className="pt-2 text-[11px] font-mono text-gray-400 flex items-center gap-1.5">
               <CheckCircle2 className="w-3.5 h-3.5 text-gray-500" /> Planned: authentic stdout / stderr streams
@@ -197,18 +197,18 @@ export default function HomePage() {
           {[
             {
               role: "Indie Founders & Solo Devs",
-              desc: "Ship full-stack SaaS products using BYOK keys without paying high monthly token subscription overheads.",
-              highlight: "BYOK & Speed"
+              desc: "Ship full-stack SaaS products using BYOK keys without paying high monthly token subscription overheads. BYOK is a planned feature.",
+              highlight: "BYOK & Speed (Planned)"
             },
             {
               role: "Senior Software Engineers",
-              desc: "Inspect real AST diffs, terminal outputs, and dependency trees rather than guessing what AI generated.",
-              highlight: "Real Execution"
+              desc: "Inspect real AST diffs, terminal outputs, and dependency trees rather than guessing what AI generated. These capabilities are planned for the roadmap.",
+              highlight: "Real Execution (Planned)"
             },
             {
               role: "Privacy-Conscious Teams",
-              desc: "Run local Ollama or LM Studio models via direct local bridge for zero-telemetry internal code generation.",
-              highlight: "Local LLM Bridge"
+              desc: "Run local Ollama or LM Studio models via a planned local bridge for zero-telemetry internal code generation. This is an architecture proposal.",
+              highlight: "Local LLM Bridge (Planned)"
             }
           ].map((item) => (
             <div key={item.role} className="p-6 rounded-xl glass-panel space-y-3">
@@ -229,7 +229,7 @@ export default function HomePage() {
             Ready to experience authentic AI software engineering?
           </h2>
           <p className="text-sm text-gray-400 max-w-xl mx-auto">
-            Launch the workspace, connect your API keys or local models, and build with real execution.
+            Preview the workspace, explore the BYOK and local model architecture, and follow the roadmap toward real execution.
           </p>
           <div className="flex justify-center gap-4">
             <Link

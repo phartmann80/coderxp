@@ -1,7 +1,22 @@
 import type { Metadata, Viewport } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { GlobalHeader } from "@/components/navigation/GlobalHeader";
 import { EnterpriseFooter } from "@/components/navigation/EnterpriseFooter";
+
+const inter = Inter({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-inter",
+  display: "swap",
+});
+
+const jetbrains = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-jetbrains",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "CoderXP | The Signature AI Software Engineering Workspace",
@@ -40,7 +55,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className={`dark ${inter.variable} ${jetbrains.variable}`}>
       <body className="bg-obsidian text-gray-100 min-h-screen flex flex-col antialiased selection:bg-accent-cyan/30 selection:text-white">
         <GlobalHeader />
         <main className="flex-1 flex flex-col">{children}</main>

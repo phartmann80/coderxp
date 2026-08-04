@@ -24,7 +24,7 @@ export default function HomePage() {
       
       {/* HERO SECTION */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 md:pt-8 text-center space-y-8">
-       
+        
         {/* Badge */}
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-obsidian-card border border-titanium-border text-xs text-gray-300 font-mono">
           <Sparkles className="w-3.5 h-3.5 text-accent-cyan" />
@@ -63,6 +63,7 @@ export default function HomePage() {
         <div className="pt-8 max-w-5xl mx-auto">
           <HeroVideo />
         </div>
+
       </section>
 
       {/* MODEL SUPPORT TICKER */}
@@ -179,7 +180,7 @@ export default function HomePage() {
                 <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> Real terminal stdout/stderr stream execution (Planned)</li>
                 <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> BYOK First: OpenAI, Anthropic, Gemini, DeepSeek, Local (Planned)</li>
                 <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-emerald-400" /> Obsidian titanium developer-first aesthetic</li>
-                <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> Open standards & exportable repositories (Planned)</li>
+                <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> Open standards &amp; exportable repositories (Planned)</li>
               </ul>
             </div>
 

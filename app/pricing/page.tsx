@@ -26,12 +26,12 @@ export default function PricingPage() {
             </div>
             <h2 className="text-2xl font-bold text-white">BYOK Free Tier</h2>
             <p className="text-xs text-gray-400">For developers & teams connecting direct provider API keys.</p>
-            <div className="text-3xl font-bold text-white font-mono">$0 <span className="text-xs font-normal text-gray-500">/ forever</span></div>
+            <div className="text-3xl font-bold text-white font-mono">$0 <span className="text-xs font-normal text-gray-400">/ forever</span></div>
             <ul className="space-y-2.5 text-xs text-gray-300">
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Unlimited BYOK keys (OpenAI, Anthropic, Gemini, DeepSeek) (Planned)</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Local LLM Bridge (Ollama, LM Studio) (Planned)</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> 3-Panel Signature Workspace UI (Planned)</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Browser WebContainer Execution Engine (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-400" /> Unlimited BYOK keys (OpenAI, Anthropic, Gemini, DeepSeek) (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-400" /> Local LLM Bridge (Ollama, LM Studio) (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-400" /> 3-Panel Signature Workspace UI (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-400" /> Browser WebContainer Execution Engine (Planned)</li>
             </ul>
           </div>
           <Link href="/workspace" className="w-full py-3 rounded-xl bg-obsidian-card border border-titanium-border hover:border-accent-cyan text-white font-semibold text-xs text-center transition-colors">
@@ -47,12 +47,12 @@ export default function PricingPage() {
             </div>
             <h2 className="text-2xl font-bold text-white">Managed AI Pro</h2>
             <p className="text-xs text-gray-400">For engineers who prefer hosted AI routing without managing individual API keys.</p>
-            <div className="text-3xl font-bold text-white font-mono">$29 <span className="text-xs font-normal text-gray-500">/ month</span></div>
+            <div className="text-3xl font-bold text-white font-mono">$29 <span className="text-xs font-normal text-gray-400">/ month</span></div>
             <ul className="space-y-2.5 text-xs text-gray-300">
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Hosted Mastra AI Orchestration (Planned)</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> High-speed isolated container sandbox execution (Planned)</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Full BYOK fallback capability (Planned)</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Priority server execution queue (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-400" /> Hosted Mastra AI Orchestration (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-400" /> High-speed isolated container sandbox execution (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-400" /> Full BYOK fallback capability (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-400" /> Priority server execution queue (Planned)</li>
             </ul>
           </div>
           <Link href="/workspace" className="w-full py-3 rounded-xl bg-accent-cyan text-obsidian-deep font-semibold text-xs text-center hover:bg-accent-cyan/90 transition-colors">

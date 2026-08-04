@@ -33,7 +33,7 @@ export default function ModelsPage() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-mono text-accent-cyan">{p.type}</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-titanium-border/60 text-gray-300">
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-titanium-border/60 text-gray-300">
                   {p.status}
                 </span>
               </div>

@@ -36,7 +36,7 @@ export default function WorkspacePage() {
             <span className="w-3 h-3 rounded-full bg-green-500/80" />
             <span className="ml-2 text-white font-semibold">coderxp-workspace-architecture</span>
           </div>
-          <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 text-[10px]">
+          <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 text-[11px]">
             Planned Milestone 4
           </span>
         </div>
@@ -50,7 +50,7 @@ export default function WorkspacePage() {
               <p className="text-accent-cyan font-semibold mb-2">1. Left Panel</p>
               <p className="text-gray-400 text-[11px]">Conversation History, Project Context, Multimodal attachments, Voice Waveform input, Model selector.</p>
             </div>
-            <div className="p-2 rounded bg-obsidian-card text-[10px] text-gray-500 border border-titanium-border/60">
+            <div className="p-2 rounded bg-obsidian-card text-[11px] text-gray-400 border border-titanium-border/60">
               Model: Claude 3.5 Sonnet (BYOK)
             </div>
           </div>
@@ -61,7 +61,7 @@ export default function WorkspacePage() {
               <p className="text-accent-emerald font-semibold mb-2">2. Center Panel</p>
               <p className="text-gray-400 text-[11px]">Multi-tab syntax editor, AST file diff viewer, and real terminal output log stream.</p>
             </div>
-            <div className="p-2 rounded bg-obsidian-card text-[10px] text-emerald-400 border border-titanium-border/60">
+            <div className="p-2 rounded bg-obsidian-card text-[11px] text-emerald-400 border border-titanium-border/60">
               $ pnpm build ✓ Real Terminal Logs
             </div>
           </div>
@@ -72,7 +72,7 @@ export default function WorkspacePage() {
               <p className="text-accent-amber font-semibold mb-2">3. Right Panel</p>
               <p className="text-gray-400 text-[11px]">Interactive sandboxed live preview runner, viewport toggles (Desktop, Mobile), shareable preview URL.</p>
             </div>
-            <div className="p-2 rounded bg-obsidian-card text-[10px] text-gray-400 border border-titanium-border/60">
+            <div className="p-2 rounded bg-obsidian-card text-[11px] text-gray-400 border border-titanium-border/60">
               https://coderxp.pro/preview/demo
             </div>
           </div>

@@ -69,7 +69,7 @@ export default function FeaturesPage() {
                 <p className="text-xs text-gray-400 leading-relaxed">{f.desc}</p>
               </div>
               <div className="pt-3 border-t border-titanium-border/60">
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-titanium-border/60 text-gray-400">
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-titanium-border/60 text-gray-400">
                   {f.capabilityStatus}
                 </span>
               </div>

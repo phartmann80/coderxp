@@ -67,7 +67,7 @@ export default function HomePage() {
       {/* MODEL SUPPORT TICKER */}
       <section className="border-y border-titanium-border/80 bg-obsidian-card/60 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4">
-          <p className="text-xs uppercase tracking-widest font-mono text-gray-500">
+          <p className="text-xs uppercase tracking-widest font-mono text-gray-400">
             Planned Frontier & Local AI Model Support
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 pt-2">
@@ -81,7 +81,7 @@ export default function HomePage() {
             ].map((m) => (
               <div key={m.name} className="p-3 rounded-lg bg-obsidian-deep border border-titanium-border text-left">
                 <p className="text-xs font-medium text-white">{m.name}</p>
-                <p className="text-[10px] text-gray-500 font-mono mt-0.5">{m.type}</p>
+                <p className="text-[11px] text-gray-400 font-mono mt-0.5">{m.type}</p>
               </div>
             ))}
           </div>
@@ -106,12 +106,12 @@ export default function HomePage() {
             <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify-center text-accent-cyan">
               <Terminal className="w-5 h-5" />
             </div>
-            <h3 className="text-lg font-semibold text-white">Real Terminal Execution <span className="text-xs text-gray-500 font-normal">(Planned)</span></h3>
+            <h3 className="text-lg font-semibold text-white">Real Terminal Execution <span className="text-[11px] text-gray-400 font-normal">(Planned)</span></h3>
             <p className="text-xs text-gray-400 leading-relaxed">
               No simulated installation bars or fake command logs. Authentic execution output directly from isolated execution containers is a core goal of the roadmap.
             </p>
             <div className="pt-2 text-[11px] font-mono text-gray-400 flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5 text-gray-500" /> Planned: authentic stdout / stderr streams
+              <CheckCircle2 className="w-3.5 h-3.5 text-gray-400" /> Planned: authentic stdout / stderr streams
             </div>
           </div>
 
@@ -212,7 +212,7 @@ export default function HomePage() {
             }
           ].map((item) => (
             <div key={item.role} className="p-6 rounded-xl glass-panel space-y-3">
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/20">
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/20">
                 {item.highlight}
               </span>
               <h3 className="text-sm font-semibold text-white">{item.role}</h3>

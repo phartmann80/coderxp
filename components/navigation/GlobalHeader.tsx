@@ -37,16 +37,17 @@ export function GlobalHeader() {
         <Link href="/" className="flex items-center gap-3 group">
           <div className="relative w-8 h-8 flex items-center justify-center rounded-lg bg-obsidian-card border border-titanium-border group-hover:border-accent-cyan/50 transition-colors">
             <Image
-              src="/logo.png"
+              src="/logo-optimized.png"
               alt="CoderXP"
               width={24}
               height={24}
               className="object-contain"
+              priority
             />
           </div>
           <span className="font-semibold tracking-tight text-white text-lg flex items-center gap-2">
             Coder<span className="text-accent-cyan">XP</span>
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-titanium-border/60 text-gray-400 font-mono">
+            <span className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-titanium-border/60 text-gray-400 font-mono">
               M1
             </span>
           </span>

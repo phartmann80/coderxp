@@ -7,21 +7,24 @@ import { Play, Shield, Terminal, Cpu, CheckCircle } from "lucide-react";
 interface HeroVideoProps {
   desktopSrc?: string;
   mobileSrc?: string;
-  posterSrc?: string;
+  posterDesktop?: string;
+  posterMobile?: string;
 }
 
 export function HeroVideo({
   desktopSrc = "/video/coderxp-hero-desktop.mp4",
   mobileSrc = "/video/coderxp-hero-mobile.mp4",
-  posterSrc = "/images/coderxp-hero-poster.jpg",
+  posterDesktop = "/images/coderxp-hero-poster-desktop.webp",
+  posterMobile = "/images/coderxp-hero-poster-mobile.webp",
 }: HeroVideoProps) {
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [videoError, setVideoError] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    // Check for reduced motion media query
+    setMounted(true);
     const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     setPrefersReducedMotion(mediaQuery.matches);
 
@@ -30,14 +33,33 @@ export function HeroVideo({
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
 
+  // Determine whether to show the poster image layer
+  // Show poster when: video hasn't loaded yet, video errored, or reduced motion is preferred
+  const showPoster = !videoLoaded || videoError || prefersReducedMotion;
+  // Only attempt video playback when motion is allowed and no error
+  const showVideo = mounted && !prefersReducedMotion && !videoError;
+
   return (
     <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-titanium-border bg-obsidian-card glass-panel titanium-border-glow shadow-2xl">
-      
-      {/* Video element */}
-      {!prefersReducedMotion && !videoError && (
+
+      {/* Optimized next/image poster layer — the LCP element */}
+      {showPoster && (
+        <Image
+          src={posterMobile}
+          alt="CoderXP workspace preview"
+          fill
+          priority
+          sizes="(max-width: 768px) 100vw, (max-width: 1200px) 100vw, 1200px"
+          className="object-cover"
+          quality={75}
+        />
+      )}
+
+      {/* Video element — fades in over the poster once loaded */}
+      {showVideo && (
         <video
           ref={videoRef}
-          className={`w-full h-full object-cover transition-opacity duration-700 ${
+          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${
             videoLoaded ? "opacity-100" : "opacity-0"
           }`}
           autoPlay
@@ -45,7 +67,6 @@ export function HeroVideo({
           loop
           playsInline
           preload="metadata"
-          poster={posterSrc}
           onLoadedData={() => setVideoLoaded(true)}
           onError={() => setVideoError(true)}
         >
@@ -57,7 +78,7 @@ export function HeroVideo({
       {/* Fallback Motion Layer & UI Showcase Shell (active if video is loading or fallback mode) */}
       {(!videoLoaded || videoError || prefersReducedMotion) && (
         <div className="absolute inset-0 bg-gradient-to-br from-obsidian-card via-obsidian-elevated to-obsidian-deep flex flex-col justify-between p-4 sm:p-6 font-mono text-xs overflow-hidden">
-          
+
           {/* Header Bar */}
           <div className="flex items-center justify-between border-b border-titanium-border pb-3">
             <div className="flex items-center gap-2">
@@ -66,11 +87,11 @@ export function HeroVideo({
               <span className="w-2.5 h-2.5 rounded-full bg-green-500/80" />
               <span className="text-gray-400 text-[11px] ml-2">coderxp-workspace-preview</span>
             </div>
-            <div className="flex items-center gap-3 text-gray-500 text-[11px]">
-              <span className="flex items-center gap-1 text-gray-500 font-semibold">
+            <div className="flex items-center gap-3 text-gray-400 text-[11px]">
+              <span className="flex items-center gap-1 text-gray-400 font-semibold">
                 <CheckCircle className="w-3 h-3" /> Execution Engine (Planned)
               </span>
-              <span className="flex items-center gap-1 text-gray-500">
+              <span className="flex items-center gap-1 text-gray-400">
                 <Cpu className="w-3 h-3" /> BYOK (Planned)
               </span>
             </div>
@@ -78,7 +99,7 @@ export function HeroVideo({
 
           {/* Interactive Workspace Motion Preview Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-auto">
-            
+
             {/* Context & Prompt Panel */}
             <div className="p-3.5 rounded-lg bg-obsidian-deep/90 border border-titanium-border space-y-2">
               <div className="text-accent-cyan flex items-center gap-1.5 text-[11px] font-semibold">
@@ -87,7 +108,7 @@ export function HeroVideo({
               <p className="text-gray-300 text-[11px]">
                 Build a SaaS application with Next.js 14, real-time Supabase auth, and direct local Ollama integration.
               </p>
-              <div className="pt-2 flex items-center gap-1 text-[10px] text-gray-500">
+              <div className="pt-2 flex items-center gap-1 text-[11px] text-gray-400">
                 <span className="px-1.5 py-0.5 rounded bg-titanium-border/60 text-gray-300">Claude 3.5 Sonnet</span>
                 <span className="px-1.5 py-0.5 rounded bg-titanium-border/60 text-gray-300">BYOK</span>
               </div>
@@ -98,8 +119,8 @@ export function HeroVideo({
               <div className="text-accent-emerald flex items-center gap-1.5 text-[11px] font-semibold">
                 <Shield className="w-3.5 h-3.5" /> 2. Real Execution Terminal
               </div>
-              <div className="text-[10px] text-gray-400 space-y-1 font-mono">
-                <p className="text-gray-500">$ pnpm install @supabase/ssr lucide-react</p>
+              <div className="text-[11px] text-gray-400 space-y-1 font-mono">
+                <p className="text-gray-400">$ pnpm install @supabase/ssr lucide-react</p>
                 <p className="text-emerald-400">✓ Resolved dependencies (142 packages)</p>
                 <p className="text-cyan-400">✓ AST diff created: app/page.tsx</p>
               </div>
@@ -109,9 +130,9 @@ export function HeroVideo({
             <div className="p-3.5 rounded-lg bg-obsidian-deep/90 border border-titanium-border space-y-2">
               <div className="text-gray-300 flex items-center justify-between text-[11px] font-semibold">
                 <span>3. Live Preview Runner</span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400">Interactive</span>
+                <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400">Interactive</span>
               </div>
-              <div className="h-16 rounded bg-obsidian-card border border-titanium-border/60 flex items-center justify-center text-gray-500 text-[10px]">
+              <div className="h-16 rounded bg-obsidian-card border border-titanium-border/60 flex items-center justify-center text-gray-400 text-[11px]">
                 Preview Runner Isolated iFrame Sandbox
               </div>
             </div>
@@ -119,9 +140,9 @@ export function HeroVideo({
           </div>
 
           {/* Bottom Bar */}
-          <div className="flex items-center justify-between pt-3 border-t border-titanium-border/60 text-[10px] text-gray-500">
+          <div className="flex items-center justify-between pt-3 border-t border-titanium-border/60 text-[11px] text-gray-400">
             <span>Story Sequence: Idea → Understanding → Planning → Code → Execution → Verification → Live Preview → Share</span>
-            <span className="font-mono text-gray-500">CoderXP Preview</span>
+            <span className="font-mono text-gray-400">CoderXP Preview</span>
           </div>
 
         </div>

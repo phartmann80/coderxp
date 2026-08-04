@@ -14,7 +14,7 @@ export function EnterpriseFooter() {
           <div className="col-span-2 space-y-4">
             <Link href="/" className="flex items-center gap-3">
               <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-obsidian-card border border-titanium-border">
-                <Image src="/logo.png" alt="CoderXP" width={24} height={24} className="object-contain" />
+                <Image src="/logo-optimized.png" alt="CoderXP" width={24} height={24} className="object-contain" priority />
               </div>
               <span className="font-semibold text-white text-base tracking-tight">
                 Coder<span className="text-accent-cyan">XP</span>
@@ -28,7 +28,7 @@ export function EnterpriseFooter() {
                 <span className="w-1.5 h-1.5 rounded-full bg-accent-amber" />
                 In Development
               </span>
-              <span className="text-[11px] font-mono text-gray-500">Milestone 1</span>
+              <span className="text-[11px] font-mono text-gray-400">Milestone 1</span>
             </div>
           </div>
 
@@ -52,7 +52,7 @@ export function EnterpriseFooter() {
               <li><Link href="/docs" className="hover:text-white transition-colors">Documentation</Link></li>
               <li><Link href="/api" className="hover:text-white transition-colors">API Specifications</Link></li>
               <li><Link href="/security" className="hover:text-white transition-colors">Security Architecture</Link></li>
-              <li><a href="https://github.com/phartmann80/coderxp" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-white transition-colors">GitHub Repository <ArrowUpRight className="w-3 h-3 text-gray-500" /></a></li>
+              <li><a href="https://github.com/phartmann80/coderxp" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-white transition-colors">GitHub Repository <ArrowUpRight className="w-3 h-3 text-gray-400" /></a></li>
               <li><Link href="/contact" className="hover:text-white transition-colors">Developer Support</Link></li>
             </ul>
           </div>
@@ -71,7 +71,7 @@ export function EnterpriseFooter() {
 
         {/* Bottom Disclaimer & Copyright */}
         <div className="pt-8 border-t border-titanium-border/60 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-[11px] text-gray-500">
+          <p className="text-[11px] text-gray-400">
             &copy; {new Date().getFullYear()} CoderXP. All rights reserved. Handcrafted with craftsmanship for software engineers.
           </p>
           <div className="flex items-center gap-4 text-gray-400">

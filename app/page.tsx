@@ -13,7 +13,9 @@ import {
   Lock, 
   Globe, 
   Server,
-  Sparkles
+  Sparkles,
+  X,
+  Check
 } from "lucide-react";
 
 export default function HomePage() {
@@ -36,7 +38,7 @@ export default function HomePage() {
 
         {/* Subtitle */}
         <p className="text-base sm:text-lg text-gray-400 max-w-3xl mx-auto leading-relaxed">
-          CoderXP replaces generic AI chat loops with an authentic software engineering workspace. Real code execution, bring-your-own-keys, and zero simulated typing.
+          CoderXP is an AI software engineering workspace in development. Bring-your-own-keys, local model bridge, and real execution are core goals of the roadmap.
         </p>
 
         {/* Call To Action Buttons */}
@@ -45,7 +47,7 @@ export default function HomePage() {
             href="/workspace"
             className="px-6 py-3.5 rounded-xl bg-accent-cyan text-obsidian-deep font-semibold text-sm hover:bg-accent-cyan/90 transition-all flex items-center gap-2 shadow-lg shadow-accent-cyan/20"
           >
-            Launch Workspace
+            Preview Workspace
             <ArrowRight className="w-4 h-4" />
           </Link>
           <Link
@@ -67,8 +69,8 @@ export default function HomePage() {
       {/* MODEL SUPPORT TICKER */}
       <section className="border-y border-titanium-border/80 bg-obsidian-card/60 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4">
-          <p className="text-xs uppercase tracking-widest font-mono text-gray-500">
-            Supported Frontier & Local AI Models
+          <p className="text-xs uppercase tracking-widest font-mono text-gray-400">
+            Planned Frontier & Local AI Model Support
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 pt-2">
             {[
@@ -81,7 +83,7 @@ export default function HomePage() {
             ].map((m) => (
               <div key={m.name} className="p-3 rounded-lg bg-obsidian-deep border border-titanium-border text-left">
                 <p className="text-xs font-medium text-white">{m.name}</p>
-                <p className="text-[10px] text-gray-500 font-mono mt-0.5">{m.type}</p>
+                <p className="text-[11px] text-gray-400 font-mono mt-0.5">{m.type}</p>
               </div>
             ))}
           </div>
@@ -106,12 +108,12 @@ export default function HomePage() {
             <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify-center text-accent-cyan">
               <Terminal className="w-5 h-5" />
             </div>
-            <h3 className="text-lg font-semibold text-white">Real Terminal Execution</h3>
+            <h3 className="text-lg font-semibold text-white">Real Terminal Execution <span className="text-[11px] text-gray-400 font-normal">(Planned)</span></h3>
             <p className="text-xs text-gray-400 leading-relaxed">
-              No simulated installation bars or fake command logs. Real execution output directly from isolated execution containers.
+              No simulated installation bars or fake command logs. Authentic execution output directly from isolated execution containers is a core goal of the roadmap.
             </p>
-            <div className="pt-2 text-[11px] font-mono text-accent-emerald flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Authentic stdout / stderr streams
+            <div className="pt-2 text-[11px] font-mono text-gray-400 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 text-gray-400" /> Planned: authentic stdout / stderr streams
             </div>
           </div>
 
@@ -120,12 +122,12 @@ export default function HomePage() {
             <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify-center text-accent-cyan">
               <Key className="w-5 h-5" />
             </div>
-            <h3 className="text-lg font-semibold text-white">Bring Your Own Keys (BYOK)</h3>
+            <h3 className="text-lg font-semibold text-white">Bring Your Own Keys (BYOK) <span className="text-[11px] text-gray-400 font-normal">(Planned)</span></h3>
             <p className="text-xs text-gray-400 leading-relaxed">
-              Connect your own API keys for OpenAI, Anthropic, Google, DeepSeek, and Groq. Zero markups, direct provider streaming.
+              CoderXP is being designed to let developers connect supported provider credentials directly. BYOK routing and provider streaming are planned for a future milestone.
             </p>
             <div className="pt-2 text-[11px] font-mono text-accent-cyan flex items-center gap-1.5">
-              <Lock className="w-3.5 h-3.5" /> AES-256 encrypted key vault
+              <Lock className="w-3.5 h-3.5" /> Planned: AES-256 encrypted key vault
             </div>
           </div>
 
@@ -134,12 +136,12 @@ export default function HomePage() {
             <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify-center text-accent-cyan">
               <Cpu className="w-5 h-5" />
             </div>
-            <h3 className="text-lg font-semibold text-white">Local Model Bridge</h3>
+            <h3 className="text-lg font-semibold text-white">Local Model Bridge <span className="text-[11px] text-gray-400 font-normal">(Planned)</span></h3>
             <p className="text-xs text-gray-400 leading-relaxed">
-              Connect local LLM deployments (Ollama, LM Studio) directly to your workspace for 100% private zero-telemetry workflows.
+              CoderXP is exploring secure connections to local Ollama and LM Studio environments. The local bridge is an architecture proposal and is not yet available.
             </p>
             <div className="pt-2 text-[11px] font-mono text-gray-400 flex items-center gap-1.5">
-              <Server className="w-3.5 h-3.5 text-accent-amber" /> Zero latency local IPC bridge
+              <Server className="w-3.5 h-3.5 text-accent-amber" /> Planned: local IPC bridge architecture
             </div>
           </div>
 
@@ -162,10 +164,10 @@ export default function HomePage() {
                 Generic AI Builders
               </h3>
               <ul className="space-y-2 text-xs text-gray-400 font-mono">
-                <li className="flex items-center gap-2">✕ Simulated fake typing animations</li>
-                <li className="flex items-center gap-2">✕ Forced monthly API token markups</li>
-                <li className="flex items-center gap-2">✕ Cliché purple/magenta glow themes</li>
-                <li className="flex items-center gap-2">✕ Single-provider vendor lock-in</li>
+                <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Simulated fake typing animations</li>
+                <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Forced monthly API token markups</li>
+                <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Cliché purple/magenta glow themes</li>
+                <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Single-provider vendor lock-in</li>
               </ul>
             </div>
 
@@ -175,10 +177,10 @@ export default function HomePage() {
                 CoderXP Craftsmanship
               </h3>
               <ul className="space-y-2 text-xs text-gray-200 font-mono">
-                <li className="flex items-center gap-2">✓ Real terminal stdout/stderr stream execution</li>
-                <li className="flex items-center gap-2">✓ BYOK First (OpenAI, Anthropic, Gemini, DeepSeek, Local)</li>
-                <li className="flex items-center gap-2">✓ Obsidian titanium developer-first aesthetic</li>
-                <li className="flex items-center gap-2">✓ Open standards & exportable repositories</li>
+                <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> Real terminal stdout/stderr stream execution (Planned)</li>
+                <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> BYOK First: OpenAI, Anthropic, Gemini, DeepSeek, Local (Planned)</li>
+                <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-emerald-400" /> Obsidian titanium developer-first aesthetic</li>
+                <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> Open standards &amp; exportable repositories (Planned)</li>
               </ul>
             </div>
 
@@ -197,22 +199,22 @@ export default function HomePage() {
           {[
             {
               role: "Indie Founders & Solo Devs",
-              desc: "Ship full-stack SaaS products using BYOK keys without paying high monthly token subscription overheads.",
-              highlight: "BYOK & Speed"
+              desc: "Ship full-stack SaaS products using BYOK keys without paying high monthly token subscription overheads. BYOK is a planned feature.",
+              highlight: "BYOK & Speed (Planned)"
             },
             {
               role: "Senior Software Engineers",
-              desc: "Inspect real AST diffs, terminal outputs, and dependency trees rather than guessing what AI generated.",
-              highlight: "Real Execution"
+              desc: "Inspect real AST diffs, terminal outputs, and dependency trees rather than guessing what AI generated. These capabilities are planned for the roadmap.",
+              highlight: "Real Execution (Planned)"
             },
             {
               role: "Privacy-Conscious Teams",
-              desc: "Run local Ollama or LM Studio models via direct local bridge for zero-telemetry internal code generation.",
-              highlight: "Local LLM Bridge"
+              desc: "Run local Ollama or LM Studio models via a planned local bridge for private internal code generation. This is an architecture proposal, not yet available.",
+              highlight: "Local LLM Bridge (Planned)"
             }
           ].map((item) => (
             <div key={item.role} className="p-6 rounded-xl glass-panel space-y-3">
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/20">
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/20">
                 {item.highlight}
               </span>
               <h3 className="text-sm font-semibold text-white">{item.role}</h3>
@@ -229,14 +231,14 @@ export default function HomePage() {
             Ready to experience authentic AI software engineering?
           </h2>
           <p className="text-sm text-gray-400 max-w-xl mx-auto">
-            Launch the workspace, connect your API keys or local models, and build with real execution.
+            Preview the workspace, explore the BYOK and local model architecture, and follow the roadmap toward real execution.
           </p>
           <div className="flex justify-center gap-4">
             <Link
               href="/workspace"
               className="px-6 py-3.5 rounded-xl bg-accent-cyan text-obsidian-deep font-semibold text-sm hover:bg-accent-cyan/90 transition-all flex items-center gap-2"
             >
-              Launch Workspace Now
+              Preview Workspace Now
               <ArrowRight className="w-4 h-4" />
             </Link>
           </div>

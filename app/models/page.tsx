@@ -2,15 +2,15 @@ import { Cpu, ShieldCheck, Zap, Server } from "lucide-react";
 
 export default function ModelsPage() {
   const providers = [
-    { name: "Anthropic", models: ["Claude 3.5 Sonnet", "Claude 3.5 Haiku", "Claude 3 Opus"], type: "BYOK Provider", status: "Supported" },
-    { name: "OpenAI", models: ["GPT-4o", "o1", "o3-mini", "GPT-4 Turbo"], type: "BYOK Provider", status: "Supported" },
-    { name: "Google Gemini", models: ["Gemini 2.0 Flash", "Gemini 1.5 Pro"], type: "BYOK Provider", status: "Supported" },
-    { name: "DeepSeek", models: ["DeepSeek-V3", "DeepSeek-R1 (Reasoner)"], type: "BYOK Provider", status: "Supported" },
-    { name: "Mistral AI", models: ["Codestral", "Mistral Large 2"], type: "BYOK Provider", status: "Supported" },
-    { name: "Groq", models: ["Llama-3.3-70b (Ultra Fast)"], type: "BYOK Provider", status: "Supported" },
-    { name: "OpenRouter", models: ["Unified Multi-Model Gateway"], type: "BYOK Provider", status: "Supported" },
-    { name: "Local Ollama", models: ["Llama 3.2, Qwen 2.5, DeepSeek-R1 Local"], type: "Local Bridge", status: "Technical Proposal" },
-    { name: "Local LM Studio", models: ["Custom Local GGUF Deployments"], type: "Local Bridge", status: "Technical Proposal" },
+    { name: "Anthropic", models: ["Claude 3.5 Sonnet", "Claude 3.5 Haiku", "Claude 3 Opus"], type: "BYOK Provider", status: "Planned" },
+    { name: "OpenAI", models: ["GPT-4o", "o1", "o3-mini", "GPT-4 Turbo"], type: "BYOK Provider", status: "Planned" },
+    { name: "Google Gemini", models: ["Gemini 2.0 Flash", "Gemini 1.5 Pro"], type: "BYOK Provider", status: "Planned" },
+    { name: "DeepSeek", models: ["DeepSeek-V3", "DeepSeek-R1 (Reasoner)"], type: "BYOK Provider", status: "Planned" },
+    { name: "Mistral AI", models: ["Codestral", "Mistral Large 2"], type: "BYOK Provider", status: "Planned" },
+    { name: "Groq", models: ["Llama-3.3-70b (Ultra Fast)"], type: "BYOK Provider", status: "Planned" },
+    { name: "OpenRouter", models: ["Unified Multi-Model Gateway"], type: "BYOK Provider", status: "Planned" },
+    { name: "Local Ollama", models: ["Llama 3.2, Qwen 2.5, DeepSeek-R1 Local"], type: "Local Bridge", status: "Architecture Proposal" },
+    { name: "Local LM Studio", models: ["Custom Local GGUF Deployments"], type: "Local Bridge", status: "Architecture Proposal" },
   ];
 
   return (
@@ -23,7 +23,7 @@ export default function ModelsPage() {
           Frontier & Local LLMs
         </h1>
         <p className="text-sm sm:text-base text-gray-400">
-          Connect your choice of frontier commercial models or local zero-telemetry LLM deployments.
+          Connect your choice of frontier commercial models or local LLM deployments. All provider integrations are planned for the roadmap.
         </p>
       </div>
 
@@ -33,7 +33,7 @@ export default function ModelsPage() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-mono text-accent-cyan">{p.type}</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-titanium-border/60 text-gray-300">
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-titanium-border/60 text-gray-300">
                   {p.status}
                 </span>
               </div>

@@ -1,4 +1,3 @@
-"use me";
 "use client";
 
 import { useState } from "react";
@@ -38,17 +37,18 @@ export function GlobalHeader() {
         <Link href="/" className="flex items-center gap-3 group">
           <div className="relative w-8 h-8 flex items-center justify-center rounded-lg bg-obsidian-card border border-titanium-border group-hover:border-accent-cyan/50 transition-colors">
             <Image
-              src="/logo.png"
+              src="/logo-optimized.png"
               alt="CoderXP"
               width={24}
               height={24}
               className="object-contain"
+              priority
             />
           </div>
           <span className="font-semibold tracking-tight text-white text-lg flex items-center gap-2">
             Coder<span className="text-accent-cyan">XP</span>
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-titanium-border/60 text-gray-400 font-mono">
-              v1.0
+            <span className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-titanium-border/60 text-gray-400 font-mono">
+              M1
             </span>
           </span>
         </Link>
@@ -87,7 +87,7 @@ export function GlobalHeader() {
             href="/workspace"
             className="px-4 py-2 rounded-lg bg-accent-cyan text-obsidian-deep text-xs font-semibold hover:bg-accent-cyan/90 transition-all flex items-center gap-1.5 shadow-sm shadow-accent-cyan/20"
           >
-            Launch Workspace
+            Preview Workspace
             <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         </div>
@@ -125,7 +125,7 @@ export function GlobalHeader() {
               onClick={() => setMobileMenuOpen(false)}
               className="w-full text-center py-2.5 rounded-lg bg-accent-cyan text-obsidian-deep text-xs font-semibold"
             >
-              Launch Workspace
+              Preview Workspace
             </Link>
           </div>
         </div>

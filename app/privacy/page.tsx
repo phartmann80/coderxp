@@ -29,7 +29,7 @@ export default function PrivacyPage() {
 
         <h2 className="text-sm font-semibold text-white uppercase tracking-wider font-mono">2. API Credentials & BYOK Data</h2>
         <p>
-          User-supplied API keys (OpenAI, Anthropic, Gemini, DeepSeek) are stored using server-side AES-256-GCM encryption and used solely to proxy LLM requests on the user's behalf.
+          User-supplied API keys (OpenAI, Anthropic, Gemini, DeepSeek) will be stored using server-side AES-256-GCM encryption and used solely to proxy LLM requests on the user&apos;s behalf. (Planned architecture)
         </p>
 
         <h2 className="text-sm font-semibold text-white uppercase tracking-wider font-mono">3. Local Models Data</h2>

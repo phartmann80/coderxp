@@ -11,17 +11,17 @@ export default function ByokPage() {
           Bring Your Own Keys (BYOK)
         </h1>
         <p className="text-sm sm:text-base text-gray-400">
-          Developers shouldn't pay inflated monthly markups for AI tokens. Connect your direct API credentials and pay providers directly at raw cost.
+          CoderXP is being designed to let developers connect supported provider credentials directly. BYOK routing and provider streaming are planned for a future milestone.
         </p>
       </div>
 
       <div className="glass-panel p-8 rounded-2xl space-y-8">
         <div className="space-y-3">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Lock className="w-5 h-5 text-accent-cyan" /> AES-256-GCM Server Encryption Model
+            <Lock className="w-5 h-5 text-accent-cyan" /> AES-256-GCM Server Encryption Model (Planned)
           </h2>
           <p className="text-xs sm:text-sm text-gray-300 leading-relaxed">
-            Secrets in the BYOK vault are encrypted at rest using server-side AES-256-GCM before database storage. Raw API keys are never exposed in browser storage, client bundles, or telemetry logs.
+            Secrets in the BYOK vault will be encrypted at rest using server-side AES-256-GCM before database storage. Raw API keys will never be exposed in browser storage, client bundles, or telemetry logs. This is a planned architecture specification, not yet implemented.
           </p>
         </div>
 
@@ -30,7 +30,7 @@ export default function ByokPage() {
             <RefreshCw className="w-5 h-5 text-accent-emerald" /> Rotation & Scope Governance
           </h2>
           <p className="text-xs sm:text-sm text-gray-300 leading-relaxed">
-            Users can instantly rotate, test connection latency, or revoke provider keys. Project-level scoping ensures teams can isolate keys per project.
+            Users will be able to instantly rotate, test connection latency, or revoke provider keys. Project-level scoping will ensure teams can isolate keys per project. (Planned)
           </p>
         </div>
 
@@ -39,7 +39,7 @@ export default function ByokPage() {
             <Zap className="w-5 h-5 text-accent-amber" /> Direct Provider Streaming
           </h2>
           <p className="text-xs sm:text-sm text-gray-300 leading-relaxed">
-            Requests stream directly from official provider endpoints (OpenAI, Anthropic, Google, DeepSeek) ensuring zero intermediate latency degradation.
+            Requests are designed to stream directly from official provider endpoints (OpenAI, Anthropic, Google, DeepSeek) without intermediate proxy overhead. This is a planned capability, not yet implemented.
           </p>
         </div>
       </div>

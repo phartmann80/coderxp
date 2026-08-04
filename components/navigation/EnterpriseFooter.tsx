@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { ShieldCheck, Activity, Github, Twitter, Linkedin, MessageSquare, ArrowUpRight } from "lucide-react";
+import { ShieldCheck, Activity, Github, ArrowUpRight } from "lucide-react";
 
 export function EnterpriseFooter() {
   return (
@@ -14,27 +14,27 @@ export function EnterpriseFooter() {
           <div className="col-span-2 space-y-4">
             <Link href="/" className="flex items-center gap-3">
               <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-obsidian-card border border-titanium-border">
-                <Image src="/logo.png" alt="CoderXP" width={24} height={24} className="object-contain" />
+                <Image src="/logo-optimized.png" alt="CoderXP" width={24} height={24} className="object-contain" priority />
               </div>
               <span className="font-semibold text-white text-base tracking-tight">
                 Coder<span className="text-accent-cyan">XP</span>
               </span>
             </Link>
             <p className="text-gray-400 max-w-sm text-xs leading-relaxed">
-              The signature AI software engineering workspace. Built for engineers, founders, and technical teams demanding real code execution, bring-your-own-keys, and zero generic AI tropes.
+              The signature AI software engineering workspace. Built for engineers, founders, and technical teams. Bring-your-own-keys, local LLM bridge, and real execution engine are planned for future milestones.
             </p>
             <div className="flex items-center gap-2 pt-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono bg-emerald-950/60 border border-emerald-800/40 text-emerald-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                All Systems Operational
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono bg-titanium-border/40 border border-titanium-border text-gray-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent-amber" />
+                In Development
               </span>
-              <span className="text-[11px] font-mono text-gray-500">v1.0.0-pro</span>
+              <span className="text-[11px] font-mono text-gray-400">Milestone 1</span>
             </div>
           </div>
 
           {/* Column 1: Product */}
           <div className="space-y-3">
-            <h4 className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Product</h4>
+            <p className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Product</p>
             <ul className="space-y-2">
               <li><Link href="/features" className="hover:text-white transition-colors">Features</Link></li>
               <li><Link href="/workspace" className="hover:text-white transition-colors">Workspace</Link></li>
@@ -47,19 +47,19 @@ export function EnterpriseFooter() {
 
           {/* Column 2: Ecosystem & Developer */}
           <div className="space-y-3">
-            <h4 className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Developers</h4>
+            <p className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Developers</p>
             <ul className="space-y-2">
               <li><Link href="/docs" className="hover:text-white transition-colors">Documentation</Link></li>
               <li><Link href="/api" className="hover:text-white transition-colors">API Specifications</Link></li>
               <li><Link href="/security" className="hover:text-white transition-colors">Security Architecture</Link></li>
-              <li><a href="https://github.com/phartmann80/coderxp" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-white transition-colors">GitHub Repository <ArrowUpRight className="w-3 h-3 text-gray-500" /></a></li>
+              <li><a href="https://github.com/phartmann80/coderxp" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-white transition-colors">GitHub Repository <ArrowUpRight className="w-3 h-3 text-gray-400" /></a></li>
               <li><Link href="/contact" className="hover:text-white transition-colors">Developer Support</Link></li>
             </ul>
           </div>
 
           {/* Column 3: Legal & Governance */}
           <div className="space-y-3">
-            <h4 className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Governance</h4>
+            <p className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Governance</p>
             <ul className="space-y-2">
               <li><Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link></li>
               <li><Link href="/terms" className="hover:text-white transition-colors">Terms of Service</Link></li>
@@ -71,19 +71,14 @@ export function EnterpriseFooter() {
 
         {/* Bottom Disclaimer & Copyright */}
         <div className="pt-8 border-t border-titanium-border/60 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-[11px] text-gray-500">
-            &copy; {new Date().getFullYear()} CoderXP Inc. All rights reserved. Handcrafted with craftsmanship for software engineers.
+          <p className="text-[11px] text-gray-400">
+            &copy; {new Date().getFullYear()} CoderXP. All rights reserved. Handcrafted with craftsmanship for software engineers.
           </p>
           <div className="flex items-center gap-4 text-gray-400">
             <a href="https://github.com/phartmann80/coderxp" target="_blank" rel="noreferrer" aria-label="GitHub" className="hover:text-white transition-colors">
               <Github className="w-4 h-4" />
             </a>
-            <a href="https://x.com" target="_blank" rel="noreferrer" aria-label="X (Twitter)" className="hover:text-white transition-colors">
-              <Twitter className="w-4 h-4" />
-            </a>
-            <a href="https://discord.gg" target="_blank" rel="noreferrer" aria-label="Discord" className="hover:text-white transition-colors">
-              <MessageSquare className="w-4 h-4" />
-            </a>
+
           </div>
         </div>
 

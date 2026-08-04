@@ -1,28 +1,30 @@
-"use me";
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
-import { Play, Shield, Terminal, Cpu, CheckCircle } from "lucide-react";
+import { Shield, Terminal, Cpu, ArrowRight } from "lucide-react";
 
 interface HeroVideoProps {
   desktopSrc?: string;
   mobileSrc?: string;
-  posterSrc?: string;
+  posterDesktop?: string;
+  posterMobile?: string;
+  videoEnabled?: boolean;
 }
 
 export function HeroVideo({
   desktopSrc = "/video/coderxp-hero-desktop.mp4",
   mobileSrc = "/video/coderxp-hero-mobile.mp4",
-  posterSrc = "/images/coderxp-hero-poster.webp",
+  posterDesktop = "/images/coderxp-hero-poster-desktop.webp",
+  posterMobile = "/images/coderxp-hero-poster-mobile.webp",
+  videoEnabled = false,
 }: HeroVideoProps) {
-  const [videoLoaded, setVideoLoaded] = useState(false);
-  const [videoError, setVideoError] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const [mounted, setMounted] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
 
   useEffect(() => {
-    // Check for reduced motion media query
+    setMounted(true);
     const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     setPrefersReducedMotion(mediaQuery.matches);
 
@@ -31,88 +33,111 @@ export function HeroVideo({
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
 
+  useEffect(() => {
+    const desktopQuery = window.matchMedia("(min-width: 768px)");
+    setIsDesktop(desktopQuery.matches);
+    const handleResize = () => setIsDesktop(desktopQuery.matches);
+    desktopQuery.addEventListener("change", handleResize);
+    return () => desktopQuery.removeEventListener("change", handleResize);
+  }, []);
+
+  // When videoEnabled is false, we never render the <video> element or request MP4s.
+  const showVideo = videoEnabled && mounted && !prefersReducedMotion;
+
+  // Only render the appropriate poster to avoid duplicate downloads
+  const posterSrc = isDesktop ? posterDesktop : posterMobile;
+  const posterSizes = isDesktop
+    ? "(max-width: 1200px) 100vw, 1200px"
+    : "100vw";
+
   return (
     <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-titanium-border bg-obsidian-card glass-panel titanium-border-glow shadow-2xl">
-      
-      {/* Video element */}
-      {!prefersReducedMotion && !videoError && (
+
+      {/* Optimized poster layer — the LCP element */}
+      {/* Only the appropriate poster for the current viewport is rendered */}
+      {mounted && (
+        <Image
+          src={posterSrc}
+          alt="CoderXP workspace concept preview"
+          fill
+          priority
+          sizes={posterSizes}
+          className="object-cover"
+          quality={75}
+        />
+      )}
+
+      {/* Video element — only rendered when videoEnabled is true and motion is allowed */}
+      {showVideo && (
         <video
-          ref={videoRef}
-          className={`w-full h-full object-cover transition-opacity duration-700 ${
-            videoLoaded ? "opacity-100" : "opacity-0"
-          }`}
+          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700 opacity-0"
           autoPlay
           muted
           loop
           playsInline
           preload="metadata"
-          poster={posterSrc}
-          onLoadedData={() => setVideoLoaded(true)}
-          onError={() => setVideoError(true)}
         >
           <source src={desktopSrc} type="video/mp4" media="(min-width: 768px)" />
           <source src={mobileSrc} type="video/mp4" />
         </video>
       )}
 
-      {/* Fallback Motion Layer & UI Showcase Shell (active if video is loading or fallback mode) */}
-      {(!videoLoaded || videoError || prefersReducedMotion) && (
-        <div className="absolute inset-0 bg-gradient-to-br from-obsidian-card via-obsidian-elevated to-obsidian-deep flex flex-col justify-between p-4 sm:p-6 font-mono text-xs overflow-hidden">
-          
+      {/* Honest Architecture Concept Preview — always shown when video is not active */}
+      {(!showVideo || prefersReducedMotion) && (
+        <div className="absolute inset-0 bg-gradient-to-br from-obsidian-card/95 via-obsidian-elevated/95 to-obsidian-deep/95 flex flex-col justify-between p-4 sm:p-6 font-mono text-xs overflow-hidden">
+
           {/* Header Bar */}
           <div className="flex items-center justify-between border-b border-titanium-border pb-3">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
               <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80" />
               <span className="w-2.5 h-2.5 rounded-full bg-green-500/80" />
-              <span className="text-gray-400 text-[11px] ml-2">coderxp-workspace-v1.0.0</span>
+              <span className="text-gray-400 text-[11px] ml-2">coderxp-workspace-concept</span>
             </div>
-            <div className="flex items-center gap-3 text-gray-500 text-[11px]">
-              <span className="flex items-center gap-1 text-accent-emerald font-semibold">
-                <CheckCircle className="w-3 h-3" /> Real Execution Engine
+            <div className="flex items-center gap-3 text-gray-400 text-[11px]">
+              <span className="flex items-center gap-1 text-gray-400 font-semibold">
+                <Cpu className="w-3 h-3" /> Execution Engine (Planned)
               </span>
-              <span className="flex items-center gap-1 text-accent-cyan">
-                <Cpu className="w-3 h-3" /> BYOK Active
+              <span className="flex items-center gap-1 text-gray-400">
+                <Shield className="w-3 h-3" /> BYOK (Planned)
               </span>
             </div>
           </div>
 
-          {/* Interactive Workspace Motion Preview Grid */}
+          {/* Architecture Concept Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-auto">
-            
-            {/* Context & Prompt Panel */}
+
+            {/* Input & Architecture */}
             <div className="p-3.5 rounded-lg bg-obsidian-deep/90 border border-titanium-border space-y-2">
               <div className="text-accent-cyan flex items-center gap-1.5 text-[11px] font-semibold">
-                <Terminal className="w-3.5 h-3.5" /> 1. Input & Architecture
+                <Terminal className="w-3.5 h-3.5" /> 1. Input &amp; Architecture
               </div>
-              <p className="text-gray-300 text-[11px]">
-                Build a SaaS application with Next.js 14, real-time Supabase auth, and direct local Ollama integration.
+              <p className="text-gray-400 text-[11px]">
+                Planned: conversation context, project scaffolding, and multimodal input routing.
               </p>
-              <div className="pt-2 flex items-center gap-1 text-[10px] text-gray-500">
-                <span className="px-1.5 py-0.5 rounded bg-titanium-border/60 text-gray-300">Claude 3.5 Sonnet</span>
-                <span className="px-1.5 py-0.5 rounded bg-titanium-border/60 text-gray-300">BYOK</span>
+              <div className="pt-2 flex items-center gap-1 text-[11px] text-gray-400">
+                <span className="px-1.5 py-0.5 rounded bg-titanium-border/60 text-gray-300">Planned</span>
               </div>
             </div>
 
-            {/* Live Terminal & AST Diff */}
+            {/* Execution Environment Concept */}
             <div className="p-3.5 rounded-lg bg-obsidian-deep/90 border border-titanium-border space-y-2">
               <div className="text-accent-emerald flex items-center gap-1.5 text-[11px] font-semibold">
-                <Shield className="w-3.5 h-3.5" /> 2. Real Execution Terminal
+                <Shield className="w-3.5 h-3.5" /> 2. Execution Environment Concept
               </div>
-              <div className="text-[10px] text-gray-400 space-y-1 font-mono">
-                <p className="text-gray-500">$ pnpm install @supabase/ssr lucide-react</p>
-                <p className="text-emerald-400">✓ Resolved dependencies (142 packages)</p>
-                <p className="text-cyan-400">✓ AST diff created: app/page.tsx</p>
+              <div className="text-[11px] text-gray-400 space-y-1 font-mono">
+                <p className="text-gray-400">Planned: isolated execution containers</p>
+                <p className="text-gray-400">Planned: authentic stdout / stderr streams</p>
               </div>
             </div>
 
-            {/* Interactive Live Preview */}
+            {/* Live Preview Concept */}
             <div className="p-3.5 rounded-lg bg-obsidian-deep/90 border border-titanium-border space-y-2">
               <div className="text-gray-300 flex items-center justify-between text-[11px] font-semibold">
-                <span>3. Live Preview Runner</span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400">Interactive</span>
+                <span>3. Live Preview</span>
+                <span className="text-[11px] px-1.5 py-0.5 rounded bg-titanium-border/60 text-gray-400">Planned</span>
               </div>
-              <div className="h-16 rounded bg-obsidian-card border border-titanium-border/60 flex items-center justify-center text-gray-500 text-[10px]">
+              <div className="h-16 rounded bg-obsidian-card border border-titanium-border/60 flex items-center justify-center text-[11px] text-gray-400">
                 Preview Runner Isolated iFrame Sandbox
               </div>
             </div>
@@ -120,9 +145,12 @@ export function HeroVideo({
           </div>
 
           {/* Bottom Bar */}
-          <div className="flex items-center justify-between pt-3 border-t border-titanium-border/60 text-[10px] text-gray-500">
-            <span>Story Sequence: Idea → Understanding → Planning → Code → Execution → Verification → Live Preview</span>
-            <span className="font-mono text-accent-cyan">CoderXP Engine Verified</span>
+          <div className="flex items-center justify-between pt-3 border-t border-titanium-border/60 text-[11px] text-gray-400">
+            <span className="flex items-center gap-1.5">
+              <ArrowRight className="w-3 h-3" />
+              Story Sequence: Idea, Understanding, Planning, Code, Execution, Verification, Live Preview, Share
+            </span>
+            <span className="font-mono text-gray-400">Product concept preview — functionality not active</span>
           </div>
 
         </div>

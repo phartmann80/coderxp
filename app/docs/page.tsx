@@ -30,7 +30,7 @@ export default function DocsPage() {
           <Link key={doc.title} href={doc.href} className="p-6 rounded-xl glass-panel hover:border-accent-cyan/40 transition-all space-y-3 group">
             <h3 className="text-base font-semibold text-white group-hover:text-accent-cyan transition-colors flex items-center justify-between">
               {doc.title}
-              <ArrowRight className="w-4 h-4 text-gray-500 group-hover:text-accent-cyan transition-colors" />
+              <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-accent-cyan transition-colors" />
             </h3>
             <p className="text-xs text-gray-400 leading-relaxed">{doc.desc}</p>
           </Link>

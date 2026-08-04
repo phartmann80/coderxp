@@ -34,7 +34,7 @@ export function EnterpriseFooter() {
 
           {/* Column 1: Product */}
           <div className="space-y-3">
-            <h4 className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Product</h4>
+            <p className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Product</p>
             <ul className="space-y-2">
               <li><Link href="/features" className="hover:text-white transition-colors">Features</Link></li>
               <li><Link href="/workspace" className="hover:text-white transition-colors">Workspace</Link></li>
@@ -47,7 +47,7 @@ export function EnterpriseFooter() {
 
           {/* Column 2: Ecosystem & Developer */}
           <div className="space-y-3">
-            <h4 className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Developers</h4>
+            <p className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Developers</p>
             <ul className="space-y-2">
               <li><Link href="/docs" className="hover:text-white transition-colors">Documentation</Link></li>
               <li><Link href="/api" className="hover:text-white transition-colors">API Specifications</Link></li>
@@ -59,7 +59,7 @@ export function EnterpriseFooter() {
 
           {/* Column 3: Legal & Governance */}
           <div className="space-y-3">
-            <h4 className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Governance</h4>
+            <p className="text-white text-xs font-semibold uppercase tracking-wider font-mono">Governance</p>
             <ul className="space-y-2">
               <li><Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link></li>
               <li><Link href="/terms" className="hover:text-white transition-colors">Terms of Service</Link></li>

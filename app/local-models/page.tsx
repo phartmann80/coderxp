@@ -21,7 +21,7 @@ export default function LocalModelsPage() {
           <AlertTriangle className="w-4 h-4" /> Hosted Server vs Local Environment Scope
         </div>
         <p className="text-gray-400 leading-relaxed">
-          When CoderXP runs as a web app, <code className="text-gray-200">http://localhost:11434</code> refers to the user's computer, not the hosting web server. CoderXP bridges this network boundary securely without exposing private local networks.
+          When CoderXP runs as a web app, <code className="text-gray-200">http://localhost:11434</code> refers to the user&apos;s computer, not the hosting web server. CoderXP bridges this network boundary securely without exposing private local networks.
         </p>
       </div>
 
@@ -32,7 +32,7 @@ export default function LocalModelsPage() {
             <Code2 className="w-5 h-5 text-accent-cyan" /> Option A: Browser-Direct CORS Connection
           </h3>
           <p className="text-xs text-gray-300 leading-relaxed">
-            The browser executes client-side <code className="text-accent-cyan font-mono">fetch()</code> directly to <code className="text-gray-200 font-mono">http://localhost:11434</code>. Requires setting <code className="text-gray-200 font-mono">OLLAMA_ORIGINS="https://coderxp.app"</code> to grant explicit CORS permission.
+            The browser executes client-side <code className="text-accent-cyan font-mono">fetch()</code> directly to <code className="text-gray-200 font-mono">http://localhost:11434</code>. Requires setting <code className="text-gray-200 font-mono">OLLAMA_ORIGINS=&quot;https://coderxp.pro&quot;</code> to grant explicit CORS permission.
           </p>
         </div>
 

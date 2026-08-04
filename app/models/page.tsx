@@ -2,15 +2,15 @@ import { Cpu, ShieldCheck, Zap, Server } from "lucide-react";
 
 export default function ModelsPage() {
   const providers = [
-    { name: "Anthropic", models: ["Claude 3.5 Sonnet", "Claude 3.5 Haiku", "Claude 3 Opus"], type: "BYOK Provider", status: "Supported" },
-    { name: "OpenAI", models: ["GPT-4o", "o1", "o3-mini", "GPT-4 Turbo"], type: "BYOK Provider", status: "Supported" },
-    { name: "Google Gemini", models: ["Gemini 2.0 Flash", "Gemini 1.5 Pro"], type: "BYOK Provider", status: "Supported" },
-    { name: "DeepSeek", models: ["DeepSeek-V3", "DeepSeek-R1 (Reasoner)"], type: "BYOK Provider", status: "Supported" },
-    { name: "Mistral AI", models: ["Codestral", "Mistral Large 2"], type: "BYOK Provider", status: "Supported" },
-    { name: "Groq", models: ["Llama-3.3-70b (Ultra Fast)"], type: "BYOK Provider", status: "Supported" },
-    { name: "OpenRouter", models: ["Unified Multi-Model Gateway"], type: "BYOK Provider", status: "Supported" },
-    { name: "Local Ollama", models: ["Llama 3.2, Qwen 2.5, DeepSeek-R1 Local"], type: "Local Bridge", status: "Technical Proposal" },
-    { name: "Local LM Studio", models: ["Custom Local GGUF Deployments"], type: "Local Bridge", status: "Technical Proposal" },
+    { name: "Anthropic", models: ["Claude 3.5 Sonnet", "Claude 3.5 Haiku", "Claude 3 Opus"], type: "BYOK Provider", status: "Planned" },
+    { name: "OpenAI", models: ["GPT-4o", "o1", "o3-mini", "GPT-4 Turbo"], type: "BYOK Provider", status: "Planned" },
+    { name: "Google Gemini", models: ["Gemini 2.0 Flash", "Gemini 1.5 Pro"], type: "BYOK Provider", status: "Planned" },
+    { name: "DeepSeek", models: ["DeepSeek-V3", "DeepSeek-R1 (Reasoner)"], type: "BYOK Provider", status: "Planned" },
+    { name: "Mistral AI", models: ["Codestral", "Mistral Large 2"], type: "BYOK Provider", status: "Planned" },
+    { name: "Groq", models: ["Llama-3.3-70b (Ultra Fast)"], type: "BYOK Provider", status: "Planned" },
+    { name: "OpenRouter", models: ["Unified Multi-Model Gateway"], type: "BYOK Provider", status: "Planned" },
+    { name: "Local Ollama", models: ["Llama 3.2, Qwen 2.5, DeepSeek-R1 Local"], type: "Local Bridge", status: "Architecture Proposal" },
+    { name: "Local LM Studio", models: ["Custom Local GGUF Deployments"], type: "Local Bridge", status: "Architecture Proposal" },
   ];
 
   return (

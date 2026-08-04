@@ -5,13 +5,13 @@ import { EnterpriseFooter } from "@/components/navigation/EnterpriseFooter";
 
 export const metadata: Metadata = {
   title: "CoderXP | The Signature AI Software Engineering Workspace",
-  description: "Handcrafted, ultra-premium AI software engineering workspace built for developers, founders, and teams. Real execution engine, bring-your-own-keys, and local LLM bridge.",
-  keywords: ["AI Software Engineer", "BYOK AI", "Real Code Execution", "Developer OS", "Local LLMs", "Next.js AI Workspace"],
+  description: "AI software engineering workspace in development, built for developers, founders, and teams. Bring-your-own-keys, local LLM bridge, and real execution engine on the roadmap.",
+  keywords: ["AI Software Engineer", "BYOK AI", "Developer OS", "Local LLMs", "Next.js AI Workspace"],
   authors: [{ name: "CoderXP Team" }],
   openGraph: {
     title: "CoderXP | The Signature AI Software Engineering Workspace",
     description: "Handcrafted, ultra-premium AI software engineering workspace built for developers, founders, and teams.",
-    url: "https://coderxp.app",
+    url: "https://coderxp.pro",
     siteName: "CoderXP",
     type: "website",
   },

@@ -27,19 +27,19 @@ export default function SecurityPage() {
       <div className="space-y-6 glass-panel p-8 rounded-2xl">
         <div className="space-y-3">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Lock className="w-5 h-5 text-accent-cyan" /> AES-256-GCM Encryption at Rest
+            <Lock className="w-5 h-5 text-accent-cyan" /> AES-256-GCM Encryption at Rest (Planned)
           </h2>
           <p className="text-xs sm:text-sm text-gray-300 leading-relaxed">
-            All user-submitted API credentials stored in the BYOK vault are encrypted server-side using AES-256-GCM before database write. Secret values are never exposed in browser telemetry or public logs.
+            All user-submitted API credentials stored in the BYOK vault will be encrypted server-side using AES-256-GCM before database write. Secret values will never be exposed in browser telemetry or public logs. This is a planned architecture specification, not yet implemented.
           </p>
         </div>
 
         <div className="border-t border-titanium-border/60 pt-6 space-y-3">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Server className="w-5 h-5 text-accent-emerald" /> Execution Container Isolation
+            <Server className="w-5 h-5 text-accent-emerald" /> Execution Container Isolation (Planned)
           </h2>
           <p className="text-xs sm:text-sm text-gray-300 leading-relaxed">
-            Client previews run inside sandboxed browser WebContainers. Backend operations execute inside ephemeral, isolated server sandboxes destroyed upon completion.
+            Client previews will run inside sandboxed browser WebContainers. Backend operations will execute inside ephemeral, isolated server sandboxes destroyed upon completion. This is a planned architecture specification.
           </p>
         </div>
       </div>

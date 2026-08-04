@@ -73,7 +73,7 @@ export default function WorkspacePage() {
               <p className="text-gray-400 text-[11px]">Interactive sandboxed live preview runner, viewport toggles (Desktop, Mobile), shareable preview URL.</p>
             </div>
             <div className="p-2 rounded bg-obsidian-card text-[10px] text-gray-400 border border-titanium-border/60">
-              https://coderxp.app/preview/demo
+              https://coderxp.pro/preview/demo
             </div>
           </div>
 

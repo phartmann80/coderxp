@@ -36,7 +36,7 @@ export default function HomePage() {
 
         {/* Subtitle */}
         <p className="text-base sm:text-lg text-gray-400 max-w-3xl mx-auto leading-relaxed">
-          CoderXP replaces generic AI chat loops with an authentic software engineering workspace. Real code execution, bring-your-own-keys, and zero simulated typing.
+          CoderXP is an AI software engineering workspace in development. Bring-your-own-keys, local model bridge, and real execution are core goals of the roadmap.
         </p>
 
         {/* Call To Action Buttons */}
@@ -45,7 +45,7 @@ export default function HomePage() {
             href="/workspace"
             className="px-6 py-3.5 rounded-xl bg-accent-cyan text-obsidian-deep font-semibold text-sm hover:bg-accent-cyan/90 transition-all flex items-center gap-2 shadow-lg shadow-accent-cyan/20"
           >
-            Launch Workspace
+            Preview Workspace
             <ArrowRight className="w-4 h-4" />
           </Link>
           <Link
@@ -68,7 +68,7 @@ export default function HomePage() {
       <section className="border-y border-titanium-border/80 bg-obsidian-card/60 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4">
           <p className="text-xs uppercase tracking-widest font-mono text-gray-500">
-            Supported Frontier & Local AI Models
+            Planned Frontier & Local AI Model Support
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 pt-2">
             {[
@@ -110,8 +110,8 @@ export default function HomePage() {
             <p className="text-xs text-gray-400 leading-relaxed">
               No simulated installation bars or fake command logs. Real execution output directly from isolated execution containers.
             </p>
-            <div className="pt-2 text-[11px] font-mono text-accent-emerald flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Authentic stdout / stderr streams
+            <div className="pt-2 text-[11px] font-mono text-gray-400 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 text-gray-500" /> Planned: authentic stdout / stderr streams
             </div>
           </div>
 
@@ -125,7 +125,7 @@ export default function HomePage() {
               Connect your own API keys for OpenAI, Anthropic, Google, DeepSeek, and Groq. Zero markups, direct provider streaming.
             </p>
             <div className="pt-2 text-[11px] font-mono text-accent-cyan flex items-center gap-1.5">
-              <Lock className="w-3.5 h-3.5" /> AES-256 encrypted key vault
+              <Lock className="w-3.5 h-3.5" /> Planned: AES-256 encrypted key vault
             </div>
           </div>
 
@@ -139,7 +139,7 @@ export default function HomePage() {
               Connect local LLM deployments (Ollama, LM Studio) directly to your workspace for 100% private zero-telemetry workflows.
             </p>
             <div className="pt-2 text-[11px] font-mono text-gray-400 flex items-center gap-1.5">
-              <Server className="w-3.5 h-3.5 text-accent-amber" /> Zero latency local IPC bridge
+              <Server className="w-3.5 h-3.5 text-accent-amber" /> Planned: zero latency local IPC bridge
             </div>
           </div>
 
@@ -175,10 +175,10 @@ export default function HomePage() {
                 CoderXP Craftsmanship
               </h3>
               <ul className="space-y-2 text-xs text-gray-200 font-mono">
-                <li className="flex items-center gap-2">✓ Real terminal stdout/stderr stream execution</li>
-                <li className="flex items-center gap-2">✓ BYOK First (OpenAI, Anthropic, Gemini, DeepSeek, Local)</li>
+                <li className="flex items-center gap-2">→ Real terminal stdout/stderr stream execution (Planned)</li>
+                <li className="flex items-center gap-2">→ BYOK First: OpenAI, Anthropic, Gemini, DeepSeek, Local (Planned)</li>
                 <li className="flex items-center gap-2">✓ Obsidian titanium developer-first aesthetic</li>
-                <li className="flex items-center gap-2">✓ Open standards & exportable repositories</li>
+                <li className="flex items-center gap-2">→ Open standards & exportable repositories (Planned)</li>
               </ul>
             </div>
 
@@ -236,7 +236,7 @@ export default function HomePage() {
               href="/workspace"
               className="px-6 py-3.5 rounded-xl bg-accent-cyan text-obsidian-deep font-semibold text-sm hover:bg-accent-cyan/90 transition-all flex items-center gap-2"
             >
-              Launch Workspace Now
+              Preview Workspace Now
               <ArrowRight className="w-4 h-4" />
             </Link>
           </div>

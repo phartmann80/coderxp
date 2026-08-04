@@ -25,7 +25,7 @@ export default function AboutPage() {
             <Terminal className="w-5 h-5 text-accent-cyan" /> Authentic Software Engineering
           </h2>
           <p className="text-sm text-gray-300 leading-relaxed">
-            Software engineering is about execution, verification, and precision. CoderXP was engineered from the ground up to prioritize real terminal execution streams, genuine package resolution, and AST code diffing.
+            Software engineering is about execution, verification, and precision. CoderXP is being engineered from the ground up to prioritize real terminal execution streams, genuine package resolution, and AST code diffing. These capabilities are planned for future milestones.
           </p>
         </div>
 
@@ -34,7 +34,7 @@ export default function AboutPage() {
             <Shield className="w-5 h-5 text-accent-emerald" /> Bring Your Own Keys & Local LLMs
           </h2>
           <p className="text-sm text-gray-300 leading-relaxed">
-            We believe developers should own their AI credentials. CoderXP supports direct API connections to OpenAI, Anthropic, Google Gemini, DeepSeek, and local LLMs (Ollama, LM Studio) without hidden markups.
+            We believe developers should own their AI credentials. CoderXP will support direct API connections to OpenAI, Anthropic, Google Gemini, DeepSeek, and local LLMs (Ollama, LM Studio) without hidden markups. (Planned)
           </p>
         </div>
 
@@ -54,7 +54,7 @@ export default function AboutPage() {
           href="/workspace"
           className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-accent-cyan text-obsidian-deep font-semibold text-sm hover:bg-accent-cyan/90 transition-all"
         >
-          Explore CoderXP Workspace <ArrowRight className="w-4 h-4" />
+          Preview CoderXP Workspace <ArrowRight className="w-4 h-4" />
         </Link>
       </div>
 

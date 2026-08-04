@@ -1,4 +1,3 @@
-"use me";
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -65,14 +64,14 @@ export function HeroVideo({
               <span className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
               <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80" />
               <span className="w-2.5 h-2.5 rounded-full bg-green-500/80" />
-              <span className="text-gray-400 text-[11px] ml-2">coderxp-workspace-v1.0.0</span>
+              <span className="text-gray-400 text-[11px] ml-2">coderxp-workspace-preview</span>
             </div>
             <div className="flex items-center gap-3 text-gray-500 text-[11px]">
-              <span className="flex items-center gap-1 text-accent-emerald font-semibold">
-                <CheckCircle className="w-3 h-3" /> Real Execution Engine
+              <span className="flex items-center gap-1 text-gray-500 font-semibold">
+                <CheckCircle className="w-3 h-3" /> Execution Engine (Planned)
               </span>
-              <span className="flex items-center gap-1 text-accent-cyan">
-                <Cpu className="w-3 h-3" /> BYOK Active
+              <span className="flex items-center gap-1 text-gray-500">
+                <Cpu className="w-3 h-3" /> BYOK (Planned)
               </span>
             </div>
           </div>
@@ -121,8 +120,8 @@ export function HeroVideo({
 
           {/* Bottom Bar */}
           <div className="flex items-center justify-between pt-3 border-t border-titanium-border/60 text-[10px] text-gray-500">
-            <span>Story Sequence: Idea → Understanding → Planning → Code → Execution → Verification → Live Preview</span>
-            <span className="font-mono text-accent-cyan">CoderXP Engine Verified</span>
+            <span>Story Sequence: Idea → Understanding → Planning → Code → Execution → Verification → Live Preview → Share</span>
+            <span className="font-mono text-gray-500">CoderXP Preview</span>
           </div>
 
         </div>

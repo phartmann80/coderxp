@@ -28,14 +28,14 @@ export default function PricingPage() {
             <p className="text-xs text-gray-400">For developers & teams connecting direct provider API keys.</p>
             <div className="text-3xl font-bold text-white font-mono">$0 <span className="text-xs font-normal text-gray-500">/ forever</span></div>
             <ul className="space-y-2.5 text-xs text-gray-300">
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-accent-cyan" /> Unlimited BYOK keys (OpenAI, Anthropic, Gemini, DeepSeek)</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-accent-cyan" /> Local LLM Bridge (Ollama, LM Studio)</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-accent-cyan" /> 3-Panel Signature Workspace UI</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-accent-cyan" /> Browser WebContainer Execution Engine</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Unlimited BYOK keys (OpenAI, Anthropic, Gemini, DeepSeek) (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Local LLM Bridge (Ollama, LM Studio) (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> 3-Panel Signature Workspace UI (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Browser WebContainer Execution Engine (Planned)</li>
             </ul>
           </div>
           <Link href="/workspace" className="w-full py-3 rounded-xl bg-obsidian-card border border-titanium-border hover:border-accent-cyan text-white font-semibold text-xs text-center transition-colors">
-            Start with BYOK
+            Preview Workspace
           </Link>
         </div>
 
@@ -49,14 +49,14 @@ export default function PricingPage() {
             <p className="text-xs text-gray-400">For engineers who prefer hosted AI routing without managing individual API keys.</p>
             <div className="text-3xl font-bold text-white font-mono">$29 <span className="text-xs font-normal text-gray-500">/ month</span></div>
             <ul className="space-y-2.5 text-xs text-gray-300">
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-accent-emerald" /> Hosted Mastra AI Orchestration</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-accent-emerald" /> High-speed isolated container sandbox execution</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-accent-emerald" /> Full BYOK fallback capability</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-accent-emerald" /> Priority server execution queue</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Hosted Mastra AI Orchestration (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> High-speed isolated container sandbox execution (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Full BYOK fallback capability (Planned)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-gray-500" /> Priority server execution queue (Planned)</li>
             </ul>
           </div>
           <Link href="/workspace" className="w-full py-3 rounded-xl bg-accent-cyan text-obsidian-deep font-semibold text-xs text-center hover:bg-accent-cyan/90 transition-colors">
-            Get Started Pro
+            Join Waitlist
           </Link>
         </div>
 

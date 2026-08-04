@@ -46,10 +46,10 @@ export default function ContactPage() {
             Direct communication channel for technical team inquiries and BYOK integration guidance.
           </p>
           <a
-            href="mailto:support@coderxp.app"
+            href="mailto:support@coderxp.pro"
             className="inline-flex items-center gap-1.5 text-xs text-accent-emerald font-mono hover:underline pt-2"
           >
-            support@coderxp.app <ArrowRight className="w-3.5 h-3.5" />
+            support@coderxp.pro <ArrowRight className="w-3.5 h-3.5" />
           </a>
         </div>
 

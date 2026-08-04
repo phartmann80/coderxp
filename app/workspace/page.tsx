@@ -62,7 +62,7 @@ export default function WorkspacePage() {
               <p className="text-gray-400 text-[11px]">Multi-tab syntax editor, AST file diff viewer, and real terminal output log stream.</p>
             </div>
             <div className="p-2 rounded bg-obsidian-card text-[11px] text-emerald-400 border border-titanium-border/60">
-              $ pnpm build ✓ Real Terminal Logs
+              Planned: authentic terminal output stream
             </div>
           </div>
 

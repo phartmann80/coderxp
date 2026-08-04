@@ -13,7 +13,9 @@ import {
   Lock, 
   Globe, 
   Server,
-  Sparkles
+  Sparkles,
+  X,
+  Check
 } from "lucide-react";
 
 export default function HomePage() {
@@ -120,9 +122,9 @@ export default function HomePage() {
             <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify-center text-accent-cyan">
               <Key className="w-5 h-5" />
             </div>
-            <h3 className="text-lg font-semibold text-white">Bring Your Own Keys (BYOK)</h3>
+            <h3 className="text-lg font-semibold text-white">Bring Your Own Keys (BYOK) <span className="text-[11px] text-gray-400 font-normal">(Planned)</span></h3>
             <p className="text-xs text-gray-400 leading-relaxed">
-              Connect your own API keys for OpenAI, Anthropic, Google, DeepSeek, and Groq. Zero markups, direct provider streaming.
+              CoderXP is being designed to let developers connect supported provider credentials directly. BYOK routing and provider streaming are planned for a future milestone.
             </p>
             <div className="pt-2 text-[11px] font-mono text-accent-cyan flex items-center gap-1.5">
               <Lock className="w-3.5 h-3.5" /> Planned: AES-256 encrypted key vault
@@ -134,12 +136,12 @@ export default function HomePage() {
             <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify-center text-accent-cyan">
               <Cpu className="w-5 h-5" />
             </div>
-            <h3 className="text-lg font-semibold text-white">Local Model Bridge</h3>
+            <h3 className="text-lg font-semibold text-white">Local Model Bridge <span className="text-[11px] text-gray-400 font-normal">(Planned)</span></h3>
             <p className="text-xs text-gray-400 leading-relaxed">
-              Connect local LLM deployments (Ollama, LM Studio) directly to your workspace for 100% private zero-telemetry workflows.
+              CoderXP is exploring secure connections to local Ollama and LM Studio environments. The local bridge is an architecture proposal and is not yet available.
             </p>
             <div className="pt-2 text-[11px] font-mono text-gray-400 flex items-center gap-1.5">
-              <Server className="w-3.5 h-3.5 text-accent-amber" /> Planned: zero latency local IPC bridge
+              <Server className="w-3.5 h-3.5 text-accent-amber" /> Planned: local IPC bridge architecture
             </div>
           </div>
 
@@ -162,10 +164,10 @@ export default function HomePage() {
                 Generic AI Builders
               </h3>
               <ul className="space-y-2 text-xs text-gray-400 font-mono">
-                <li className="flex items-center gap-2">✕ Simulated fake typing animations</li>
-                <li className="flex items-center gap-2">✕ Forced monthly API token markups</li>
-                <li className="flex items-center gap-2">✕ Cliché purple/magenta glow themes</li>
-                <li className="flex items-center gap-2">✕ Single-provider vendor lock-in</li>
+                <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Simulated fake typing animations</li>
+                <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Forced monthly API token markups</li>
+                <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Cliché purple/magenta glow themes</li>
+                <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Single-provider vendor lock-in</li>
               </ul>
             </div>
 
@@ -175,10 +177,10 @@ export default function HomePage() {
                 CoderXP Craftsmanship
               </h3>
               <ul className="space-y-2 text-xs text-gray-200 font-mono">
-                <li className="flex items-center gap-2">→ Real terminal stdout/stderr stream execution (Planned)</li>
-                <li className="flex items-center gap-2">→ BYOK First: OpenAI, Anthropic, Gemini, DeepSeek, Local (Planned)</li>
-                <li className="flex items-center gap-2">✓ Obsidian titanium developer-first aesthetic</li>
-                <li className="flex items-center gap-2">→ Open standards & exportable repositories (Planned)</li>
+                <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> Real terminal stdout/stderr stream execution (Planned)</li>
+                <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> BYOK First: OpenAI, Anthropic, Gemini, DeepSeek, Local (Planned)</li>
+                <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-emerald-400" /> Obsidian titanium developer-first aesthetic</li>
+                <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> Open standards &amp; exportable repositories (Planned)</li>
               </ul>
             </div>
 
@@ -207,7 +209,7 @@ export default function HomePage() {
             },
             {
               role: "Privacy-Conscious Teams",
-              desc: "Run local Ollama or LM Studio models via a planned local bridge for zero-telemetry internal code generation. This is an architecture proposal.",
+              desc: "Run local Ollama or LM Studio models via a planned local bridge for private internal code generation. This is an architecture proposal, not yet available.",
               highlight: "Local LLM Bridge (Planned)"
             }
           ].map((item) => (

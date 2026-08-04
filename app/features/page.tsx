@@ -17,7 +17,7 @@ export default function FeaturesPage() {
     },
     {
       title: "Local Model Security Bridge",
-      desc: "Connect Ollama and LM Studio endpoints running on your local machine with zero telemetry and private code generation.",
+      desc: "CoderXP is exploring secure connections to local Ollama and LM Studio environments. The local bridge is an architecture proposal and is not yet available.",
       icon: Cpu,
       capabilityStatus: "Technical Proposal (Planned)",
     },

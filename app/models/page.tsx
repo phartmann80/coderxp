@@ -23,7 +23,7 @@ export default function ModelsPage() {
           Frontier & Local LLMs
         </h1>
         <p className="text-sm sm:text-base text-gray-400">
-          Connect your choice of frontier commercial models or local zero-telemetry LLM deployments.
+          Connect your choice of frontier commercial models or local LLM deployments. All provider integrations are planned for the roadmap.
         </p>
       </div>
 

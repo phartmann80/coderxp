@@ -12,6 +12,7 @@
  * - Singleton lifecycle: one instance per page lifetime
  * - teardown() reserved for fatal corruption / disposal only
  * - No teardown() during ordinary project switching
+ * - Failed boot clears the pending promise and permits retry
  */
 
 import { WebContainer } from "@webcontainer/api";
@@ -32,6 +33,10 @@ let bootPromise: Promise<WebContainer> | null = null;
  * Uses the binding boot options: coep require-corp,
  * forwardPreviewErrors, workdirName coderxp.
  *
+ * On failure, clears the pending promise and resets state so
+ * a later retry is possible. Does not create multiple boot
+ * attempts concurrently.
+ *
  * @returns the booted WebContainer instance
  */
 export async function bootWebContainer(): Promise<WebContainer> {
@@ -43,12 +48,20 @@ export async function bootWebContainer(): Promise<WebContainer> {
     return bootPromise;
   }
 
-  bootPromise = WebContainer.boot(WEBCONTAINER_BOOT_OPTIONS).then((instance) => {
-    webContainerInstance = instance;
-    booted = true;
-    bootPromise = null;
-    return instance;
-  });
+  bootPromise = WebContainer.boot(WEBCONTAINER_BOOT_OPTIONS)
+    .then((instance) => {
+      webContainerInstance = instance;
+      booted = true;
+      return instance;
+    })
+    .catch((error: unknown) => {
+      webContainerInstance = null;
+      booted = false;
+      throw error;
+    })
+    .finally(() => {
+      bootPromise = null;
+    });
 
   return bootPromise;
 }

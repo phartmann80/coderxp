@@ -8,19 +8,29 @@
  * or template implementation.
  */
 
-/** Supported project templates. */
-export type ProjectTemplate = "react-ts" | "nextjs-ts" | "static-html";
+/** Supported project template identifiers. */
+export type ProjectTemplateId =
+  | "react-ts"
+  | "nextjs-ts"
+  | "static-html";
 
-/** A single file entry stored in IndexedDB. */
-export interface WorkspaceFile {
-  /** Project UUID this file belongs to. */
+/** Whether a stored entry is a file or a directory. */
+export type WorkspaceEntryKind = "file" | "directory";
+
+/** A single file or directory entry stored in IndexedDB. */
+export interface WorkspaceFileRecord {
+  /** Project UUID this entry belongs to. */
   projectId: string;
   /** Normalized path relative to project root, e.g. "src/App.tsx". */
   path: string;
-  /** File contents (UTF-8 text). */
-  content: string;
+  /** Whether this entry is a file or a directory. */
+  kind: WorkspaceEntryKind;
+  /** File contents (UTF-8 text). Directories must not have contents. */
+  contents?: string;
+  /** Unix timestamp (ms) of creation. */
+  createdAt: number;
   /** Unix timestamp (ms) of last modification. */
-  lastModified: number;
+  updatedAt: number;
 }
 
 /** Project metadata stored in the IndexedDB "projects" store. */
@@ -30,7 +40,7 @@ export interface WorkspaceProject {
   /** Human-readable project name. */
   name: string;
   /** Template this project was created from. */
-  template: ProjectTemplate;
+  templateId: ProjectTemplateId;
   /** Currently active file path, or null if none. */
   activeFile: string | null;
   /** List of open tab file paths. */
@@ -38,13 +48,17 @@ export interface WorkspaceProject {
   /** Unix timestamp (ms) of creation. */
   createdAt: number;
   /** Unix timestamp (ms) of last modification. */
-  lastModified: number;
+  updatedAt: number;
+  /** Monotonically increasing revision number for optimistic concurrency. */
+  revision: number;
 }
 
-/** Workspace-level preferences stored in the "preferences" store. */
-export interface WorkspacePreferences {
-  /** Currently active project UUID, or null. */
-  activeProjectId: string | null;
+/** Workspace-level preference stored in the "preferences" store. */
+export interface WorkspacePreferenceRecord {
+  /** Preference key, e.g. "activeProjectId", "theme". */
+  key: string;
+  /** Preference value (type varies per key). */
+  value: unknown;
 }
 
 /** Process labels for terminal output streams. */
@@ -70,8 +84,8 @@ export interface ProcessOutputEntry {
 /** Runtime status of the workspace. */
 export type RuntimeStatus =
   | "idle"
-  | "booting"
+  | "starting"
   | "installing"
   | "running"
-  | "building"
-  | "error";
+  | "stopped"
+  | "failed";

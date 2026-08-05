@@ -43,3 +43,19 @@ export const EXPORT_EXCLUDES = [
   ".turbo/**",
   ".cache/**",
 ];
+
+// ---------------------------------------------------------------------------
+// Commit 2 — Persistence and template constants
+// ---------------------------------------------------------------------------
+
+/** Preference key for the currently active project ID. */
+export const PREF_ACTIVE_PROJECT_ID = "activeProjectId";
+
+/** Minimum project name length after trimming. */
+export const MIN_PROJECT_NAME_LENGTH = 1;
+
+/** Maximum project name length. */
+export const MAX_PROJECT_NAME_LENGTH = 100;
+
+/** Default port for the static template dev server. */
+export const DEFAULT_DEV_PORT = 3000;

@@ -1,0 +1,288 @@
+/**
+ * Project templates for CoderXP M2 Workspace Alpha.
+ *
+ * Commit 2 scope: one deterministic static HTML/CSS/JavaScript template
+ * and template availability metadata.
+ *
+ * Only the static-html template is currently available. React and Next.js
+ * templates are listed as unavailable with truthful reasons.
+ *
+ * The static template uses a small Node built-in HTTP server (server.mjs)
+ * with no external dependencies, no CDN, and no runtime downloads.
+ */
+
+import type { ProjectTemplate, TemplateMetadata, ProjectTemplateId } from "./types";
+
+// ---------------------------------------------------------------------------
+// Static HTML template — file contents
+// ---------------------------------------------------------------------------
+
+const STATIC_INDEX_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Static Project</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>Hello from CoderXP</h1>
+    <p>This is a static HTML project. Edit the files and refresh to see changes.</p>
+    <button id="counter-btn">Click me: 0</button>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
+`;
+
+const STATIC_STYLE_CSS = `* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+main {
+  text-align: center;
+  padding: 2rem;
+}
+
+h1 {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+p {
+  color: #94a3b8;
+  margin-bottom: 1.5rem;
+}
+
+button {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: #3b82f6;
+  color: white;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button:hover {
+  background: #2563eb;
+}
+`;
+
+const STATIC_SCRIPT_JS = `const btn = document.getElementById("counter-btn");
+let count = 0;
+
+btn.addEventListener("click", () => {
+  count++;
+  btn.textContent = "Click me: " + count;
+});
+`;
+
+const STATIC_SERVER_MJS = `import { createServer } from "node:http";
+import { readFile, stat } from "node:fs/promises";
+import { join, normalize, extname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PORT = process.env.PORT || 3000;
+const HOST = "0.0.0.0";
+
+const MIME_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".txt": "text/plain; charset=utf-8",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
+
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url, "http://localhost");
+
+  // Serve index.html for root path.
+  let pathname = url.pathname;
+  if (pathname === "/") {
+    pathname = "/index.html";
+  }
+
+  // Prevent path traversal: resolve and ensure within __dirname.
+  const filePath = normalize(join(__dirname, pathname));
+  if (!filePath.startsWith(__dirname)) {
+    res.writeHead(403);
+    res.end("403 Forbidden");
+    return;
+  }
+
+  try {
+    const stats = await stat(filePath);
+
+    // Avoid directory listing.
+    if (stats.isDirectory()) {
+      res.writeHead(403);
+      res.end("403 Forbidden");
+      return;
+    }
+
+    const data = await readFile(filePath);
+    const ext = extname(filePath);
+    const mime = MIME_TYPES[ext] || "application/octet-stream";
+
+    res.writeHead(200, { "Content-Type": mime });
+    res.end(data);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      res.writeHead(404);
+      res.end("404 Not Found");
+    } else {
+      res.writeHead(500);
+      res.end("500 Internal Server Error");
+    }
+  }
+});
+
+server.listen(PORT, HOST, () => {
+  console.log("Server running at http://" + HOST + ":" + PORT);
+});
+`;
+
+const STATIC_PACKAGE_JSON = JSON.stringify(
+  {
+    name: "coderxp-static-project",
+    version: "1.0.0",
+    private: true,
+    scripts: {
+      dev: "node server.mjs",
+    },
+  },
+  null,
+  2,
+) + "\n";
+
+const STATIC_PACKAGE_LOCK_JSON = JSON.stringify(
+  {
+    name: "coderxp-static-project",
+    version: "1.0.0",
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      "": {
+        name: "coderxp-static-project",
+        version: "1.0.0",
+      },
+    },
+  },
+  null,
+  2,
+) + "\n";
+
+// ---------------------------------------------------------------------------
+// Template definitions
+// ---------------------------------------------------------------------------
+
+/**
+ * The static HTML template.
+ *
+ * Contains: index.html, style.css, script.js, server.mjs, package.json,
+ * package-lock.json.
+ *
+ * Runtime: Node built-in HTTP server (no external dependencies, no CDN,
+ * no runtime downloads). Binds to 0.0.0.0 with process.env.PORT fallback.
+ * Prevents path traversal, serves index.html for /, uses basic MIME types,
+ * avoids directory listing, returns authentic HTTP status codes.
+ */
+export const STATIC_HTML_TEMPLATE: ProjectTemplate = {
+  id: "static-html",
+  name: "Static HTML",
+  available: true,
+  files: [
+    { path: "index.html", contents: STATIC_INDEX_HTML },
+    { path: "style.css", contents: STATIC_STYLE_CSS },
+    { path: "script.js", contents: STATIC_SCRIPT_JS },
+    { path: "server.mjs", contents: STATIC_SERVER_MJS },
+    { path: "package.json", contents: STATIC_PACKAGE_JSON },
+    { path: "package-lock.json", contents: STATIC_PACKAGE_LOCK_JSON },
+  ],
+};
+
+/**
+ * All project templates indexed by ID.
+ */
+export const PROJECT_TEMPLATES: Record<ProjectTemplateId, ProjectTemplate> = {
+  "static-html": STATIC_HTML_TEMPLATE,
+  "react-ts": {
+    id: "react-ts",
+    name: "React + TypeScript",
+    available: false,
+    unavailableReason: "Runtime verification pending",
+    files: [],
+  },
+  "nextjs-ts": {
+    id: "nextjs-ts",
+    name: "Next.js + TypeScript",
+    available: false,
+    unavailableReason: "Runtime verification pending",
+    files: [],
+  },
+};
+
+/**
+ * Template availability metadata for UI consumption.
+ * Only the static template is currently available.
+ */
+export const TEMPLATE_METADATA: TemplateMetadata[] = [
+  {
+    id: "static-html",
+    name: "Static HTML",
+    available: true,
+  },
+  {
+    id: "react-ts",
+    name: "React + TypeScript",
+    available: false,
+    unavailableReason: "Runtime verification pending",
+  },
+  {
+    id: "nextjs-ts",
+    name: "Next.js + TypeScript",
+    available: false,
+    unavailableReason: "Runtime verification pending",
+  },
+];
+
+/**
+ * Returns the template definition for the given ID, or undefined.
+ */
+export function getTemplate(id: ProjectTemplateId): ProjectTemplate | undefined {
+  return PROJECT_TEMPLATES[id];
+}
+
+/**
+ * Returns true if the template is available for project creation.
+ */
+export function isTemplateAvailable(id: ProjectTemplateId): boolean {
+  const template = PROJECT_TEMPLATES[id];
+  return template ? template.available : false;
+}

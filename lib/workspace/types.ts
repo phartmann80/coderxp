@@ -89,3 +89,76 @@ export type RuntimeStatus =
   | "running"
   | "stopped"
   | "failed";
+
+// ---------------------------------------------------------------------------
+// Commit 2 — Persistence error model
+// ---------------------------------------------------------------------------
+
+/** Typed persistence error codes. */
+export type PersistenceErrorCode =
+  | "PERSISTENCE_UNAVAILABLE"
+  | "DATABASE_OPEN_FAILED"
+  | "PROJECT_NOT_FOUND"
+  | "ENTRY_NOT_FOUND"
+  | "ENTRY_CONFLICT"
+  | "INVALID_PROJECT_NAME"
+  | "INVALID_PATH"
+  | "INVALID_ENTRY"
+  | "QUOTA_EXCEEDED"
+  | "TRANSACTION_FAILED";
+
+/**
+ * Typed persistence error. Wraps browser-level failures with a stable
+ * code so the UI layer can present meaningful messages without exposing
+ * internal browser details.
+ *
+ * The original error (when available) is preserved through `cause`.
+ * File contents and secrets are never placed inside error messages.
+ */
+export class PersistenceError extends Error {
+  readonly code: PersistenceErrorCode;
+  readonly cause: unknown;
+
+  constructor(code: PersistenceErrorCode, message: string, cause?: unknown) {
+    super(message);
+    this.name = "PersistenceError";
+    this.code = code;
+    if (cause !== undefined) {
+      this.cause = cause;
+    }
+  }
+}
+
+/** Template availability metadata. */
+export interface TemplateMetadata {
+  /** Template identifier. */
+  id: ProjectTemplateId;
+  /** Human-readable template name. */
+  name: string;
+  /** Whether the template can be used to create a new project. */
+  available: boolean;
+  /** Reason the template is unavailable, if applicable. */
+  unavailableReason?: string;
+}
+
+/** A single file within a project template definition. */
+export interface TemplateFile {
+  /** Path relative to the project root. */
+  path: string;
+  /** File contents (UTF-8 text). */
+  contents: string;
+}
+
+/** A complete project template definition. */
+export interface ProjectTemplate {
+  /** Template identifier. */
+  id: ProjectTemplateId;
+  /** Human-readable template name. */
+  name: string;
+  /** Whether the template can be used to create a new project. */
+  available: boolean;
+  /** Reason the template is unavailable, if applicable. */
+  unavailableReason?: string;
+  /** Files to seed when a project is created from this template. */
+  files: TemplateFile[];
+}

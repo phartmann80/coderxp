@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useSyncExternalStore } from "react";
 import Image from "next/image";
 import { Shield, Terminal, Cpu, ArrowRight } from "lucide-react";
 
@@ -12,6 +12,26 @@ interface HeroVideoProps {
   videoEnabled?: boolean;
 }
 
+function useMediaQuery(query: string): boolean {
+  return useSyncExternalStore(
+    (callback) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener("change", callback);
+      return () => mql.removeEventListener("change", callback);
+    },
+    () => window.matchMedia(query).matches,
+    () => false
+  );
+}
+
+function useIsClient(): boolean {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
+}
+
 export function HeroVideo({
   desktopSrc = "/video/coderxp-hero-desktop.mp4",
   mobileSrc = "/video/coderxp-hero-mobile.mp4",
@@ -19,27 +39,9 @@ export function HeroVideo({
   posterMobile = "/images/coderxp-hero-poster-mobile.webp",
   videoEnabled = false,
 }: HeroVideoProps) {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const [isDesktop, setIsDesktop] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setPrefersReducedMotion(mediaQuery.matches);
-
-    const handleChange = () => setPrefersReducedMotion(mediaQuery.matches);
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
-  }, []);
-
-  useEffect(() => {
-    const desktopQuery = window.matchMedia("(min-width: 768px)");
-    setIsDesktop(desktopQuery.matches);
-    const handleResize = () => setIsDesktop(desktopQuery.matches);
-    desktopQuery.addEventListener("change", handleResize);
-    return () => desktopQuery.removeEventListener("change", handleResize);
-  }, []);
+  const mounted = useIsClient();
+  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const isDesktop = useMediaQuery("(min-width: 768px)");
 
   // When videoEnabled is false, we never render the <video> element or request MP4s.
   const showVideo = videoEnabled && mounted && !prefersReducedMotion;

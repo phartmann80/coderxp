@@ -94,12 +94,21 @@ btn.addEventListener("click", () => {
 
 const STATIC_SERVER_MJS = `import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { join, normalize, extname } from "node:path";
+import { join, normalize, extname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PORT = process.env.PORT || 3000;
+
+function parsePort(value) {
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535) {
+    return parsed;
+  }
+  return 3000;
+}
+
+const PORT = parsePort(process.env.PORT);
 const HOST = "0.0.0.0";
 
 const MIME_TYPES = {
@@ -119,53 +128,75 @@ const MIME_TYPES = {
   ".woff2": "font/woff2",
 };
 
-const server = createServer(async (req, res) => {
-  const url = new URL(req.url, "http://localhost");
+function createStaticServer(rootDir) {
+  return createServer(async (req, res) => {
+    const url = new URL(req.url, "http://localhost");
 
-  // Serve index.html for root path.
-  let pathname = url.pathname;
-  if (pathname === "/") {
-    pathname = "/index.html";
-  }
+    let pathname;
+    try {
+      pathname = decodeURIComponent(url.pathname);
+    } catch {
+      res.writeHead(400);
+      res.end("400 Bad Request");
+      return;
+    }
 
-  // Prevent path traversal: resolve and ensure within __dirname.
-  const filePath = normalize(join(__dirname, pathname));
-  if (!filePath.startsWith(__dirname)) {
-    res.writeHead(403);
-    res.end("403 Forbidden");
-    return;
-  }
+    if (pathname === "/") {
+      pathname = "/index.html";
+    }
 
-  try {
-    const stats = await stat(filePath);
+    const filePath = join(rootDir, pathname);
+    const resolvedPath = normalize(filePath);
 
-    // Avoid directory listing.
-    if (stats.isDirectory()) {
+    // Use relative()/isAbsolute() and separator-aware checks rather than
+    // startsWith(root). Reject paths that escape the project root.
+    const rel = relative(rootDir, resolvedPath);
+    if (rel === "" || isAbsolute(rel) || rel.startsWith("..") || rel.startsWith(".." + sep)) {
       res.writeHead(403);
       res.end("403 Forbidden");
       return;
     }
 
-    const data = await readFile(filePath);
-    const ext = extname(filePath);
-    const mime = MIME_TYPES[ext] || "application/octet-stream";
+    try {
+      const stats = await stat(resolvedPath);
 
-    res.writeHead(200, { "Content-Type": mime });
-    res.end(data);
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      res.writeHead(404);
-      res.end("404 Not Found");
-    } else {
-      res.writeHead(500);
-      res.end("500 Internal Server Error");
+      if (stats.isDirectory()) {
+        res.writeHead(403);
+        res.end("403 Forbidden");
+        return;
+      }
+
+      const data = await readFile(resolvedPath);
+      const ext = extname(resolvedPath);
+      const mime = MIME_TYPES[ext] || "application/octet-stream";
+
+      res.writeHead(200, { "Content-Type": mime });
+      res.end(data);
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        res.writeHead(404);
+        res.end("404 Not Found");
+      } else {
+        res.writeHead(500);
+        res.end("500 Internal Server Error");
+      }
     }
-  }
-});
+  });
+}
 
-server.listen(PORT, HOST, () => {
-  console.log("Server running at http://" + HOST + ":" + PORT);
-});
+function startServer(server, port, host) {
+  server.listen(port, host, () => {
+    console.log("Server running at http://" + host + ":" + port);
+  });
+}
+
+export { createStaticServer, startServer, parsePort };
+
+// Start listening only when executed as the main module.
+if (import.meta.url === \`file://\${process.argv[1]}\`) {
+  const server = createStaticServer(__dirname);
+  startServer(server, PORT, HOST);
+}
 `;
 
 const STATIC_PACKAGE_JSON = JSON.stringify(

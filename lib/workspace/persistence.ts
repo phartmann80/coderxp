@@ -52,8 +52,8 @@ import {
 /** Cached open database connection (singleton). */
 let dbConnection: IDBDatabase | null = null;
 
-/** Whether a connection open is in progress. */
-let dbOpening = false;
+/** Cached pending open promise. Concurrent callers receive the same promise. */
+let dbOpenPromise: Promise<IDBDatabase> | null = null;
 
 /**
  * Returns true when IndexedDB is available in the current environment.
@@ -73,23 +73,25 @@ export function isWorkspacePersistenceAvailable(): boolean {
 /**
  * Opens (or returns the cached) workspace database connection.
  *
- * Reuses one open connection. On failure, clears the cached connection.
- * Closes the database when versionchange fires. Handles blocked, error,
- * and upgradeneeded events.
+ * Uses a cached pending promise so concurrent callers receive the same
+ * promise. On failure, clears the cached pending promise. On success,
+ * stores one connection and clears the pending promise. versionchange
+ * closes and clears the matching connection.
  *
- * Does not delete or recreate an existing database on ordinary errors.
- * Does not use localStorage as a silent fallback.
- * Does not silently discard stored records.
+ * A request that already rejected because of blocked must never later
+ * cache a successful connection. Closing while an open is pending does
+ * not permit a second parallel open or allow a late connection to escape
+ * unnoticed.
+ *
+ * Preserves the original browser error through cause when available.
  */
 export function openWorkspaceDatabase(): Promise<IDBDatabase> {
   if (dbConnection) {
     return Promise.resolve(dbConnection);
   }
 
-  if (dbOpening) {
-    return Promise.reject(
-      new PersistenceError("DATABASE_OPEN_FAILED", "Database open already in progress."),
-    );
+  if (dbOpenPromise) {
+    return dbOpenPromise;
   }
 
   if (!isWorkspacePersistenceAvailable()) {
@@ -101,15 +103,14 @@ export function openWorkspaceDatabase(): Promise<IDBDatabase> {
     );
   }
 
-  dbOpening = true;
-
-  return new Promise<IDBDatabase>((resolve, reject) => {
+  dbOpenPromise = new Promise<IDBDatabase>((resolve, reject) => {
     let request: IDBOpenDBRequest;
+    let alreadyRejected = false;
 
     try {
       request = indexedDB.open(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION);
     } catch (error) {
-      dbOpening = false;
+      dbOpenPromise = null;
       reject(
         new PersistenceError("DATABASE_OPEN_FAILED", "Failed to open database.", error),
       );
@@ -118,6 +119,7 @@ export function openWorkspaceDatabase(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (_event: IDBVersionChangeEvent) => {
       const db = request.result;
+      const tx = request.transaction;
 
       // Create stores only when absent.
       if (!db.objectStoreNames.contains(STORE_PROJECTS)) {
@@ -133,6 +135,14 @@ export function openWorkspaceDatabase(): Promise<IDBDatabase> {
             unique: false,
           });
         }
+      } else if (tx) {
+        // Obtain the existing files store from the upgrade transaction.
+        const fileStore = tx.objectStore(STORE_FILES);
+        if (!fileStore.indexNames.contains(FILES_INDEX_BY_PROJECT)) {
+          fileStore.createIndex(FILES_INDEX_BY_PROJECT, "projectId", {
+            unique: false,
+          });
+        }
       }
 
       if (!db.objectStoreNames.contains(STORE_PREFERENCES)) {
@@ -142,7 +152,13 @@ export function openWorkspaceDatabase(): Promise<IDBDatabase> {
 
     request.onsuccess = (_event: Event) => {
       const db = request.result;
-      dbOpening = false;
+
+      // If this request already rejected because of blocked, do not
+      // cache a successful connection.
+      if (alreadyRejected) {
+        db.close();
+        return;
+      }
 
       // Close and clear the cached connection when another tab upgrades.
       db.onversionchange = (_e: IDBVersionChangeEvent) => {
@@ -153,11 +169,13 @@ export function openWorkspaceDatabase(): Promise<IDBDatabase> {
       };
 
       dbConnection = db;
+      dbOpenPromise = null;
       resolve(db);
     };
 
     request.onerror = (_event: Event) => {
-      dbOpening = false;
+      alreadyRejected = true;
+      dbOpenPromise = null;
       dbConnection = null;
       reject(
         new PersistenceError("DATABASE_OPEN_FAILED", "Database open request failed.", request.error),
@@ -165,7 +183,8 @@ export function openWorkspaceDatabase(): Promise<IDBDatabase> {
     };
 
     request.onblocked = (_event: IDBVersionChangeEvent) => {
-      dbOpening = false;
+      alreadyRejected = true;
+      dbOpenPromise = null;
       dbConnection = null;
       reject(
         new PersistenceError(
@@ -175,18 +194,22 @@ export function openWorkspaceDatabase(): Promise<IDBDatabase> {
       );
     };
   });
+
+  return dbOpenPromise;
 }
 
 /**
  * Closes the cached database connection and clears the reference.
- * Safe to call when no connection is open.
+ * Safe to call when no connection is open. Does not permit a second
+ * parallel open or allow a late connection to escape unnoticed.
  */
 export function closeWorkspaceDatabase(): void {
   if (dbConnection) {
     dbConnection.close();
     dbConnection = null;
   }
-  dbOpening = false;
+  // Clear any pending open promise so a new open can start.
+  dbOpenPromise = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +348,14 @@ export async function listProjects(): Promise<WorkspaceProject[]> {
 }
 
 /**
- * Updates a project record. Increments the revision.
+ * Updates a project record using one read-write transaction.
+ *
+ * Reads the current stored project, throws PROJECT_NOT_FOUND when absent,
+ * compares the caller's expected revision with the stored revision,
+ * rejects stale writes with REVISION_CONFLICT, derives the next revision
+ * from the stored record, preserves immutable identity and creation fields,
+ * and increments revision exactly once.
+ *
  * Returns the updated project.
  */
 export async function updateProject(
@@ -333,14 +363,38 @@ export async function updateProject(
 ): Promise<WorkspaceProject> {
   const db = await openWorkspaceDatabase();
 
-  const updated: WorkspaceProject = {
-    ...project,
-    updatedAt: now(),
-    revision: project.revision + 1,
-  };
-
   const tx = db.transaction(STORE_PROJECTS, "readwrite");
   const store = tx.objectStore(STORE_PROJECTS);
+
+  // Read the current stored project.
+  const stored = await wrapRequest(
+    store.get(project.id) as IDBRequest<WorkspaceProject | undefined>,
+  );
+
+  if (!stored) {
+    throw new PersistenceError("PROJECT_NOT_FOUND", `Project not found: ${project.id}`);
+  }
+
+  // Compare the caller's expected revision with the stored revision.
+  if (project.revision !== stored.revision) {
+    throw new PersistenceError(
+      "REVISION_CONFLICT",
+      `Revision conflict: expected ${project.revision}, found ${stored.revision}.`,
+    );
+  }
+
+  // Derive the next revision from the stored record.
+  // Preserve immutable identity and creation fields.
+  const updated: WorkspaceProject = {
+    ...stored,
+    name: project.name,
+    templateId: project.templateId,
+    activeFile: project.activeFile,
+    openTabs: project.openTabs,
+    updatedAt: now(),
+    revision: stored.revision + 1,
+  };
+
   store.put(updated);
 
   await wrapTransaction(tx);
@@ -348,7 +402,12 @@ export async function updateProject(
 }
 
 /**
- * Renames a project. Validates the new name, increments revision.
+ * Renames a project in one read-write transaction.
+ *
+ * Performs read, validation, rename, timestamp update, and revision
+ * increment in a single transaction. Does not call a separate getProject()
+ * transaction followed by another transaction.
+ *
  * Returns the updated project.
  */
 export async function renameProject(
@@ -357,10 +416,32 @@ export async function renameProject(
 ): Promise<WorkspaceProject> {
   validateProjectName(newName);
 
-  const project = await getProject(projectId);
-  project.name = newName.trim();
+  const db = await openWorkspaceDatabase();
 
-  return updateProject(project);
+  const tx = db.transaction(STORE_PROJECTS, "readwrite");
+  const store = tx.objectStore(STORE_PROJECTS);
+
+  // Read the current stored project.
+  const stored = await wrapRequest(
+    store.get(projectId) as IDBRequest<WorkspaceProject | undefined>,
+  );
+
+  if (!stored) {
+    throw new PersistenceError("PROJECT_NOT_FOUND", `Project not found: ${projectId}`);
+  }
+
+  // Rename, update timestamp, increment revision.
+  const updated: WorkspaceProject = {
+    ...stored,
+    name: newName.trim(),
+    updatedAt: now(),
+    revision: stored.revision + 1,
+  };
+
+  store.put(updated);
+
+  await wrapTransaction(tx);
+  return updated;
 }
 
 /**
@@ -457,6 +538,8 @@ export async function listProjectEntries(
  *
  * File records require contents. Directory records must not store contents.
  * Paths are normalised before storage. Rejects conflicts before mutation.
+ * Confirms the project exists inside the same transaction before performing
+ * mutations. Throws PROJECT_NOT_FOUND when it does not.
  */
 export async function putEntry(
   projectId: string,
@@ -480,6 +563,14 @@ export async function putEntry(
   const fileStore = tx.objectStore(STORE_FILES);
   const projectStore = tx.objectStore(STORE_PROJECTS);
 
+  // Confirm the project exists before performing mutations.
+  const project = await wrapRequest(
+    projectStore.get(projectId) as IDBRequest<WorkspaceProject | undefined>,
+  );
+  if (!project) {
+    throw new PersistenceError("PROJECT_NOT_FOUND", `Project not found: ${projectId}`);
+  }
+
   // Check for existing entry.
   const existing = await wrapRequest(
     fileStore.get([projectId, normalisedPath]) as IDBRequest<WorkspaceFileRecord | undefined>,
@@ -494,26 +585,35 @@ export async function putEntry(
   }
 
   const timestamp = now();
-  const record: WorkspaceFileRecord = {
-    projectId,
-    path: normalisedPath,
-    kind,
-    contents: kind === "file" ? contents : undefined,
-    createdAt: existing ? existing.createdAt : timestamp,
-    updatedAt: timestamp,
-  };
+
+  // Construct file and directory records separately — directories must not
+  // have an own contents property.
+  let record: WorkspaceFileRecord;
+  if (kind === "file") {
+    record = {
+      projectId,
+      path: normalisedPath,
+      kind: "file",
+      contents: contents as string,
+      createdAt: existing ? existing.createdAt : timestamp,
+      updatedAt: timestamp,
+    };
+  } else {
+    record = {
+      projectId,
+      path: normalisedPath,
+      kind: "directory",
+      createdAt: existing ? existing.createdAt : timestamp,
+      updatedAt: timestamp,
+    };
+  }
 
   fileStore.put(record);
 
   // Update project revision.
-  const project = await wrapRequest(
-    projectStore.get(projectId) as IDBRequest<WorkspaceProject | undefined>,
-  );
-  if (project) {
-    project.updatedAt = timestamp;
-    project.revision += 1;
-    projectStore.put(project);
-  }
+  project.updatedAt = timestamp;
+  project.revision += 1;
+  projectStore.put(project);
 
   await wrapTransaction(tx);
   return record;
@@ -524,7 +624,9 @@ export async function putEntry(
  * atomically deletes the directory and all descendants in one transaction.
  *
  * The same transaction updates the project: activeFile, openTabs, updatedAt, revision.
- * Deleted paths are removed from activeFile and openTabs.
+ * Deleted paths are removed from activeFile and openTabs using equality-or-descendant
+ * semantics for directories. Confirms the project exists inside the same transaction
+ * before performing mutations. Throws PROJECT_NOT_FOUND when it does not.
  */
 export async function deleteEntry(
   projectId: string,
@@ -537,6 +639,14 @@ export async function deleteEntry(
   const tx = db.transaction([STORE_FILES, STORE_PROJECTS], "readwrite");
   const fileStore = tx.objectStore(STORE_FILES);
   const projectStore = tx.objectStore(STORE_PROJECTS);
+
+  // Confirm the project exists before performing mutations.
+  const project = await wrapRequest(
+    projectStore.get(projectId) as IDBRequest<WorkspaceProject | undefined>,
+  );
+  if (!project) {
+    throw new PersistenceError("PROJECT_NOT_FOUND", `Project not found: ${projectId}`);
+  }
 
   // Get the entry to determine if it's a file or directory.
   const entry = await wrapRequest(
@@ -568,19 +678,34 @@ export async function deleteEntry(
   }
 
   // Update project: remove deleted paths from activeFile and openTabs.
-  const project = await wrapRequest(
-    projectStore.get(projectId) as IDBRequest<WorkspaceProject | undefined>,
-  );
-  if (project) {
-    const deletedSet = new Set(pathsToDelete);
-    if (project.activeFile && deletedSet.has(project.activeFile)) {
+  // For directory deletion, clear/remove metadata paths when they are
+  // equal to the deleted directory or descendants of the deleted directory.
+  // Do this even when a stale tab path has no corresponding file record.
+  const deletedSet = new Set(pathsToDelete);
+
+  if (project.activeFile) {
+    if (deletedSet.has(project.activeFile)) {
+      project.activeFile = null;
+    } else if (entry.kind === "directory" && isDescendantPath(normalisedPath, project.activeFile)) {
       project.activeFile = null;
     }
-    project.openTabs = project.openTabs.filter((tab) => !deletedSet.has(tab));
-    project.updatedAt = now();
-    project.revision += 1;
-    projectStore.put(project);
   }
+
+  if (entry.kind === "directory") {
+    // For directory deletion, filter tabs using equality-or-descendant semantics.
+    project.openTabs = project.openTabs.filter((tab) => {
+      if (deletedSet.has(tab)) return false;
+      if (isDescendantPath(normalisedPath, tab)) return false;
+      return true;
+    });
+  } else {
+    // For file deletion, affect only the exact file path.
+    project.openTabs = project.openTabs.filter((tab) => !deletedSet.has(tab));
+  }
+
+  project.updatedAt = now();
+  project.revision += 1;
+  projectStore.put(project);
 
   await wrapTransaction(tx);
 }
@@ -594,6 +719,9 @@ export async function deleteEntry(
  *
  * Checks every destination path for conflicts before writing any changes.
  * If any operation fails, the entire transaction aborts.
+ *
+ * Confirms the project exists inside the same transaction before performing
+ * mutations. Throws PROJECT_NOT_FOUND when it does not.
  */
 export async function renameEntry(
   projectId: string,
@@ -605,20 +733,22 @@ export async function renameEntry(
   const normalisedOldPath = normalizeAndValidateWorkspacePath(oldPath);
   const normalisedNewPath = normalizeAndValidateWorkspacePath(newPath);
 
-  // Reject renaming a directory into itself or one of its descendants.
+  // Always reject oldPath === newPath.
   if (normalisedOldPath === normalisedNewPath) {
     throw new PersistenceError("INVALID_PATH", "New path must differ from old path.");
-  }
-  if (isDescendantPath(normalisedOldPath, normalisedNewPath)) {
-    throw new PersistenceError(
-      "INVALID_PATH",
-      "Cannot rename a directory into itself or one of its descendants.",
-    );
   }
 
   const tx = db.transaction([STORE_FILES, STORE_PROJECTS], "readwrite");
   const fileStore = tx.objectStore(STORE_FILES);
   const projectStore = tx.objectStore(STORE_PROJECTS);
+
+  // Confirm the project exists before performing mutations.
+  const project = await wrapRequest(
+    projectStore.get(projectId) as IDBRequest<WorkspaceProject | undefined>,
+  );
+  if (!project) {
+    throw new PersistenceError("PROJECT_NOT_FOUND", `Project not found: ${projectId}`);
+  }
 
   // Get the entry to rename.
   const entry = await wrapRequest(
@@ -627,6 +757,16 @@ export async function renameEntry(
 
   if (!entry) {
     throw new PersistenceError("ENTRY_NOT_FOUND", `Entry not found: ${normalisedOldPath}`);
+  }
+
+  // Reject newPath being a descendant of oldPath only after loading the
+  // entry and confirming it is a directory. A file rename must not be
+  // rejected merely because the destination string begins with oldPath + "/".
+  if (entry.kind === "directory" && isDescendantPath(normalisedOldPath, normalisedNewPath)) {
+    throw new PersistenceError(
+      "INVALID_PATH",
+      "Cannot rename a directory into itself or one of its descendants.",
+    );
   }
 
   // Collect all entries to move (the entry itself + descendants if directory).
@@ -642,21 +782,32 @@ export async function renameEntry(
     }
   }
 
-  // Check every destination path for conflicts before writing any changes.
-  for (const e of entriesToMove) {
-    const destPath = replacePathPrefix(e.path, normalisedOldPath, normalisedNewPath);
+  // Build the complete source-path set.
+  const sourcePaths = new Set(entriesToMove.map((e) => e.path));
+
+  // Build every destination path and confirm they are unique.
+  const destPaths = entriesToMove.map((e) =>
+    replacePathPrefix(e.path, normalisedOldPath, normalisedNewPath),
+  );
+  const destSet = new Set(destPaths);
+  if (destSet.size !== destPaths.length) {
+    throw new PersistenceError("ENTRY_CONFLICT", "Destination paths are not unique.");
+  }
+
+  // Check every destination against stored entries.
+  // Permit an occupied destination only when that exact stored key is part
+  // of the source set being moved.
+  for (const destPath of destPaths) {
     const existing = await wrapRequest(
       fileStore.get([projectId, destPath]) as IDBRequest<WorkspaceFileRecord | undefined>,
     );
-    // Conflict if a different entry (not one we're moving) exists at the destination.
-    if (existing && !entriesToMove.some((m) => m.path === existing.path)) {
+    if (existing && !sourcePaths.has(existing.path)) {
       throw new PersistenceError("ENTRY_CONFLICT", `Destination path already exists: ${destPath}`);
     }
   }
 
   // All conflict checks passed. Now perform the moves.
   const timestamp = now();
-  const oldPaths = new Set(entriesToMove.map((e) => e.path));
 
   for (const e of entriesToMove) {
     const destPath = replacePathPrefix(e.path, normalisedOldPath, normalisedNewPath);
@@ -670,20 +821,39 @@ export async function renameEntry(
   }
 
   // Update project: activeFile, openTabs, updatedAt, revision.
-  const project = await wrapRequest(
-    projectStore.get(projectId) as IDBRequest<WorkspaceProject | undefined>,
-  );
-  if (project) {
-    if (project.activeFile && oldPaths.has(project.activeFile)) {
+  // For directory rename, replace the prefix on activeFile and every
+  // affected openTabs path using equality-or-descendant semantics,
+  // independently of entriesToMove.
+  if (project.activeFile) {
+    if (project.activeFile === normalisedOldPath) {
+      project.activeFile = normalisedNewPath;
+    } else if (entry.kind === "directory" && isDescendantPath(normalisedOldPath, project.activeFile)) {
       project.activeFile = replacePathPrefix(project.activeFile, normalisedOldPath, normalisedNewPath);
     }
-    project.openTabs = project.openTabs.map((tab) =>
-      oldPaths.has(tab) ? replacePathPrefix(tab, normalisedOldPath, normalisedNewPath) : tab,
-    );
-    project.updatedAt = timestamp;
-    project.revision += 1;
-    projectStore.put(project);
   }
+
+  if (entry.kind === "directory") {
+    // For directory rename, replace prefix on every affected openTabs path
+    // using equality-or-descendant semantics, independently of entriesToMove.
+    project.openTabs = project.openTabs.map((tab) => {
+      if (tab === normalisedOldPath) {
+        return normalisedNewPath;
+      }
+      if (isDescendantPath(normalisedOldPath, tab)) {
+        return replacePathPrefix(tab, normalisedOldPath, normalisedNewPath);
+      }
+      return tab;
+    });
+  } else {
+    // For file rename, affect only the exact file path.
+    project.openTabs = project.openTabs.map((tab) =>
+      tab === normalisedOldPath ? normalisedNewPath : tab,
+    );
+  }
+
+  project.updatedAt = timestamp;
+  project.revision += 1;
+  projectStore.put(project);
 
   await wrapTransaction(tx);
 }

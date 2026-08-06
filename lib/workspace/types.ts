@@ -101,6 +101,7 @@ export type PersistenceErrorCode =
   | "PROJECT_NOT_FOUND"
   | "ENTRY_NOT_FOUND"
   | "ENTRY_CONFLICT"
+  | "REVISION_CONFLICT"
   | "INVALID_PROJECT_NAME"
   | "INVALID_PATH"
   | "INVALID_ENTRY"

@@ -29,8 +29,8 @@ export const PATH_SEPARATOR = "/";
 /** Pattern matching drive-letter prefixes (e.g. C:, D:\). */
 const DRIVE_LETTER_RE = /^[a-zA-Z]:/;
 
-/** Pattern matching common URL schemes. */
-const URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+/** Pattern matching URI-scheme prefixes (e.g. https:, file:, data:). */
+const URI_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
 /** Pattern matching null bytes. */
 const NULL_BYTE_RE = /\0/;
@@ -39,31 +39,14 @@ const NULL_BYTE_RE = /\0/;
 const CONTROL_CHAR_RE = /[\x00-\x1F\x7F]/;
 
 /**
- * Normalise a workspace path:
- * 1. Convert "\" separators to "/".
- * 2. Strip leading and trailing "/".
- * 3. Collapse consecutive "/".
+ * Normalise a workspace path: convert "\" separators to "/" only.
  *
- * Does NOT resolve "." or ".." — those are rejected by validateWorkspacePath.
- * Returns the normalised string; does not throw on its own.
+ * Does NOT strip leading/trailing separators, collapse repeated
+ * separators, or resolve "."/".." — those are rejected by
+ * validateWorkspacePath. Returns the converted string; does not throw.
  */
 export function normalizeWorkspacePath(rawPath: string): string {
-  let p = rawPath.replace(/\\/g, PATH_SEPARATOR);
-
-  // Collapse consecutive separators.
-  p = p.replace(/\/+/g, PATH_SEPARATOR);
-
-  // Strip leading separator.
-  if (p.startsWith(PATH_SEPARATOR)) {
-    p = p.slice(1);
-  }
-
-  // Strip trailing separator.
-  if (p.endsWith(PATH_SEPARATOR)) {
-    p = p.slice(0, -1);
-  }
-
-  return p;
+  return rawPath.replace(/\\/g, PATH_SEPARATOR);
 }
 
 /**
@@ -100,8 +83,8 @@ export function validateWorkspacePath(path: string): void {
     throw new PersistenceError("INVALID_PATH", "Path must not contain a drive letter.");
   }
 
-  // Reject URL-like paths.
-  if (URL_SCHEME_RE.test(path)) {
+  // Reject URI-scheme paths (after drive-letter check).
+  if (URI_SCHEME_RE.test(path)) {
     throw new PersistenceError("INVALID_PATH", "Path must not be a URL.");
   }
 
@@ -139,8 +122,16 @@ export function validateWorkspacePath(path: string): void {
 /**
  * Normalise and validate in one step. Returns the normalised path
  * or throws INVALID_PATH.
+ *
+ * Confirms the value is a string before calling string methods.
+ * Converts "\" to "/". Validates the converted but otherwise
+ * unrepaired value. Returns it only when already canonical.
  */
 export function normalizeAndValidateWorkspacePath(rawPath: string): string {
+  if (typeof rawPath !== "string") {
+    throw new PersistenceError("INVALID_PATH", "Path must be a string.");
+  }
+
   const normalised = normalizeWorkspacePath(rawPath);
   validateWorkspacePath(normalised);
   return normalised;

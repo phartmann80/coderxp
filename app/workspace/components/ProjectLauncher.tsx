@@ -1,0 +1,176 @@
+"use client";
+
+/**
+ * Project launcher for CoderXP M2 Workspace Alpha.
+ *
+ * Commit 3 scope: premium, restrained launcher consistent with CoderXP.
+ *
+ * Visual style:
+ * - Obsidian/graphite background
+ * - Warm-white text
+ * - Subtle cyan accents
+ * - Professional SVG icons through Lucide
+ * - No emoji, no purple/magenta AI styling, no oversized gradients, no fake terminal
+ *
+ * Features:
+ * - "New project" action
+ * - Project name field
+ * - Template cards (static-html available, react-ts and nextjs-ts unavailable)
+ * - Existing local projects ordered predictably (oldest first)
+ * - Last-updated information using real stored timestamps
+ * - Creating disabled while transaction is pending
+ */
+
+import { useState } from "react";
+import { FileCode2, FolderPlus, Lock, Clock, Layers } from "lucide-react";
+import { TEMPLATE_METADATA } from "@/lib/workspace/templates";
+import type { WorkspaceProject, ProjectTemplateId } from "@/lib/workspace/types";
+
+interface ProjectLauncherProps {
+  projects: WorkspaceProject[];
+  creating: boolean;
+  onCreate: (name: string, templateId: ProjectTemplateId) => void;
+  onOpen: (projectId: string) => void;
+}
+
+export function ProjectLauncher({ projects, creating, onCreate, onOpen }: ProjectLauncherProps) {
+  const [name, setName] = useState("");
+  const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplateId>("static-html");
+
+  const canCreate = name.trim().length > 0 && !creating;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canCreate) return;
+    onCreate(name, selectedTemplate);
+    setName("");
+  };
+
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  return (
+    <div className="min-h-[60vh] py-8 px-6 max-w-4xl mx-auto">
+      {/* New project section */}
+      <div className="mb-10">
+        <h2 className="text-lg font-semibold text-gray-100 mb-4 flex items-center gap-2">
+          <FolderPlus className="w-5 h-5 text-cyan-500" />
+          New project
+        </h2>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="project-name" className="block text-sm text-gray-400 mb-1.5">
+              Project name
+            </label>
+            <input
+              id="project-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={100}
+              disabled={creating}
+              placeholder="My static site"
+              className="w-full max-w-md px-3 py-2 text-sm text-gray-100 bg-gray-900 border border-gray-700 rounded-md focus:outline-none focus:border-cyan-600 transition-colors disabled:opacity-50"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Template</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl">
+              {TEMPLATE_METADATA.map((template) => {
+                const isAvailable = template.available;
+                const isSelected = selectedTemplate === template.id;
+                return (
+                  <button
+                    key={template.id}
+                    type="button"
+                    disabled={!isAvailable || creating}
+                    onClick={() => isAvailable && setSelectedTemplate(template.id)}
+                    className={`relative p-4 text-left rounded-lg border transition-all ${
+                      isSelected && isAvailable
+                        ? "border-cyan-600 bg-cyan-950/20"
+                        : isAvailable
+                          ? "border-gray-700 bg-gray-900 hover:border-gray-600"
+                          : "border-gray-800 bg-gray-900/50 cursor-not-allowed"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <Layers className={`w-4 h-4 ${isAvailable ? "text-cyan-500" : "text-gray-600"}`} />
+                      <span className={`text-sm font-medium ${isAvailable ? "text-gray-100" : "text-gray-500"}`}>
+                        {template.name}
+                      </span>
+                    </div>
+                    {!isAvailable && (
+                      <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                        <Lock className="w-3 h-3" />
+                        {template.unavailableReason ?? "Unavailable"}
+                      </div>
+                    )}
+                    {isAvailable && (
+                      <div className="text-xs text-gray-500">
+                        HTML, CSS, JavaScript
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={!canCreate}
+            className="px-5 py-2 text-sm font-medium text-white bg-cyan-700 rounded-md hover:bg-cyan-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {creating ? "Creating..." : "Create project"}
+          </button>
+        </form>
+      </div>
+
+      {/* Existing projects */}
+      <div>
+        <h2 className="text-lg font-semibold text-gray-100 mb-4 flex items-center gap-2">
+          <FileCode2 className="w-5 h-5 text-cyan-500" />
+          Your projects
+        </h2>
+
+        {projects.length === 0 ? (
+          <p className="text-sm text-gray-500 italic">No projects yet. Create one above to get started.</p>
+        ) : (
+          <div className="space-y-2">
+            {projects.map((project) => (
+              <button
+                key={project.id}
+                onClick={() => onOpen(project.id)}
+                className="flex items-center justify-between w-full p-3 text-left rounded-lg border border-gray-800 bg-gray-900 hover:border-gray-700 hover:bg-gray-800/50 transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <FileCode2 className="w-4 h-4 text-gray-500" />
+                  <div>
+                    <div className="text-sm text-gray-100 font-medium">{project.name}</div>
+                    <div className="text-xs text-gray-500">
+                      {project.templateId === "static-html" ? "Static HTML" : project.templateId}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                  <Clock className="w-3 h-3" />
+                  {formatDate(project.updatedAt)}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

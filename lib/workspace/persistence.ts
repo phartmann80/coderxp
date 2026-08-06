@@ -44,6 +44,7 @@ import {
   type WorkspaceProject,
   type ProjectTemplateId,
 } from "./types";
+import { getTemplate } from "./templates";
 
 // ---------------------------------------------------------------------------
 // Database connection lifecycle
@@ -1040,4 +1041,102 @@ export async function getActiveProjectId(): Promise<string | undefined> {
  */
 export async function setActiveProjectId(projectId: string): Promise<void> {
   await setPreference(PREF_ACTIVE_PROJECT_ID, projectId);
+}
+
+// ---------------------------------------------------------------------------
+// Commit 3 — Atomic project creation from template
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a complete project from a template in a single atomic
+ * read-write transaction across the projects, files, and preferences
+ * stores.
+ *
+ * Steps performed inside one transaction:
+ * 1. Validate and trim the project name.
+ * 2. Reject unavailable templates with TEMPLATE_UNAVAILABLE.
+ * 3. Generate the project UUID.
+ * 4. Create the project at revision 1.
+ * 5. Insert all template files.
+ * 6. Set initial activeFile (index.html if present, else first file).
+ * 7. Set initial openTabs to the same initial file.
+ * 8. Set the active-project preference.
+ *
+ * No partially created project may remain after failure: the entire
+ * operation is one transaction, so any error rolls back all writes.
+ *
+ * Does not remove or modify existing lower-level persistence operations.
+ */
+export async function createProjectFromTemplate(
+  name: string,
+  templateId: ProjectTemplateId,
+): Promise<WorkspaceProject> {
+  validateProjectName(name);
+
+  const template = getTemplate(templateId);
+  if (!template || !template.available) {
+    throw new PersistenceError(
+      "TEMPLATE_UNAVAILABLE",
+      `Template is not available: ${templateId}`,
+    );
+  }
+
+  const db = await openWorkspaceDatabase();
+
+  const timestamp = now();
+  const projectId = crypto.randomUUID();
+  const trimmedName = name.trim();
+
+  // Determine the initial active file: prefer index.html, else first file.
+  const initialActiveFile =
+    template.files.find((f) => f.path === "index.html")?.path ??
+    template.files[0]?.path ??
+    null;
+
+  const project: WorkspaceProject = {
+    id: projectId,
+    name: trimmedName,
+    templateId,
+    activeFile: initialActiveFile,
+    openTabs: initialActiveFile ? [initialActiveFile] : [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    revision: 1,
+  };
+
+  // One read-write transaction across projects, files, and preferences.
+  const tx = db.transaction(
+    [STORE_PROJECTS, STORE_FILES, STORE_PREFERENCES],
+    "readwrite",
+  );
+
+  const projectStore = tx.objectStore(STORE_PROJECTS);
+  const fileStore = tx.objectStore(STORE_FILES);
+  const prefStore = tx.objectStore(STORE_PREFERENCES);
+
+  // Insert the project record.
+  projectStore.add(project);
+
+  // Insert all template file records.
+  for (const file of template.files) {
+    const normalisedPath = normalizeAndValidateWorkspacePath(file.path);
+    const record: WorkspaceFileRecord = {
+      projectId,
+      path: normalisedPath,
+      kind: "file",
+      contents: file.contents,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    fileStore.put(record);
+  }
+
+  // Set the active project preference.
+  prefStore.put({
+    key: PREF_ACTIVE_PROJECT_ID,
+    value: projectId,
+  } satisfies WorkspacePreferenceRecord);
+
+  await wrapTransaction(tx);
+  return project;
 }

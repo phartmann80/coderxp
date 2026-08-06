@@ -106,7 +106,8 @@ export type PersistenceErrorCode =
   | "INVALID_PATH"
   | "INVALID_ENTRY"
   | "QUOTA_EXCEEDED"
-  | "TRANSACTION_FAILED";
+  | "TRANSACTION_FAILED"
+  | "TEMPLATE_UNAVAILABLE";
 
 /**
  * Typed persistence error. Wraps browser-level failures with a stable

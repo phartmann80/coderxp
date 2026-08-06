@@ -49,11 +49,61 @@ import {
 // Database connection lifecycle
 // ---------------------------------------------------------------------------
 
+/**
+ * Pending database open record. Tracks ownership and lifecycle state
+ * of an in-flight IndexedDB open request.
+ *
+ * The browser's IDBOpenDBRequest cannot be cancelled. Instead, we use
+ * explicit invalidation: a cancelled record's callbacks verify ownership
+ * and discard results from stale or cancelled opens.
+ */
+interface PendingDatabaseOpen {
+  /** The promise exposed to callers. */
+  promise: Promise<IDBDatabase>;
+  /** Set by closeWorkspaceDatabase() to invalidate this open. */
+  cancelled: boolean;
+  /** Set when the underlying IDB request reaches success or error. */
+  settled: boolean;
+  /** Set when the exposed promise has been rejected (onblocked, onerror, or cancel). */
+  rejected: boolean;
+  /** Reject function for the exposed promise. */
+  reject: (error: PersistenceError) => void;
+  /** Resolves when the underlying IDB request settles (success/error). */
+  settlePromise: Promise<void>;
+  /** Resolve function for settlePromise. */
+  resolveSettle: () => void;
+}
+
 /** Cached open database connection (singleton). */
 let dbConnection: IDBDatabase | null = null;
 
-/** Cached pending open promise. Concurrent callers receive the same promise. */
-let dbOpenPromise: Promise<IDBDatabase> | null = null;
+/** Current pending open record, or null when no open is in flight. */
+let pendingOpen: PendingDatabaseOpen | null = null;
+
+/**
+ * Returns true when `pending` is the current owner of the open lifecycle.
+ * Only the current owner may modify global state (dbConnection, pendingOpen).
+ */
+function isCurrentOwner(pending: PendingDatabaseOpen): boolean {
+  return pendingOpen === pending;
+}
+
+/**
+ * Returns true when the pending open should be discarded: the open was
+ * cancelled or the exposed promise was already rejected via onblocked.
+ * The resulting database must be closed without caching or resolving.
+ */
+function shouldDiscardOpen(pending: PendingDatabaseOpen): boolean {
+  return pending.cancelled || pending.rejected;
+}
+
+/**
+ * Returns true when a pending open exists and its underlying IDB request
+ * has not yet settled.
+ */
+function isPendingOpenInFlight(): boolean {
+  return pendingOpen !== null && !pendingOpen.settled;
+}
 
 /**
  * Returns true when IndexedDB is available in the current environment.
@@ -73,15 +123,20 @@ export function isWorkspacePersistenceAvailable(): boolean {
 /**
  * Opens (or returns the cached) workspace database connection.
  *
- * Uses a cached pending promise so concurrent callers receive the same
- * promise. On failure, clears the cached pending promise. On success,
- * stores one connection and clears the pending promise. versionchange
- * closes and clears the matching connection.
+ * Uses an owned pending-open record so concurrent callers share one open.
+ * Every callback verifies ownership before mutating global state.
  *
- * A request that already rejected because of blocked must never later
- * cache a successful connection. Closing while an open is pending does
- * not permit a second parallel open or allow a late connection to escape
- * unnoticed.
+ * Safety contracts:
+ * - closeWorkspaceDatabase() marks the pending record cancelled and
+ *   rejects the exposed promise. The underlying IDB request remains in
+ *   flight until it settles; its later onsuccess closes the database
+ *   without caching or resolving.
+ * - A new open waits for a cancelled-but-unsettled request to settle
+ *   before starting, preventing parallel opens.
+ * - onblocked rejects the exposed promise but does not settle the
+ *   request; the later onsuccess closes the database.
+ * - Synchronous indexedDB.open() failure clears the pending record
+ *   and rejects without leaving a cached rejected promise.
  *
  * Preserves the original browser error through cause when available.
  */
@@ -90,8 +145,18 @@ export function openWorkspaceDatabase(): Promise<IDBDatabase> {
     return Promise.resolve(dbConnection);
   }
 
-  if (dbOpenPromise) {
-    return dbOpenPromise;
+  if (pendingOpen) {
+    // If the pending open is cancelled but the underlying request hasn't
+    // settled yet, wait for it to settle before starting a new open.
+    if (pendingOpen.cancelled && !pendingOpen.settled) {
+      const stale = pendingOpen;
+      return stale.settlePromise.then(() => openWorkspaceDatabase());
+    }
+    // If not cancelled, share the existing pending open.
+    if (!pendingOpen.cancelled) {
+      return pendingOpen.promise;
+    }
+    // Cancelled and settled: fall through to start a new open.
   }
 
   if (!isWorkspacePersistenceAvailable()) {
@@ -103,113 +168,172 @@ export function openWorkspaceDatabase(): Promise<IDBDatabase> {
     );
   }
 
-  dbOpenPromise = new Promise<IDBDatabase>((resolve, reject) => {
-    let request: IDBOpenDBRequest;
-    let alreadyRejected = false;
+  let resolveSettle!: () => void;
+  const settlePromise = new Promise<void>((r) => {
+    resolveSettle = r;
+  });
 
-    try {
-      request = indexedDB.open(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION);
-    } catch (error) {
-      dbOpenPromise = null;
-      reject(
-        new PersistenceError("DATABASE_OPEN_FAILED", "Failed to open database.", error),
-      );
+  let resolveDb!: (db: IDBDatabase) => void;
+  let rejectDb!: (error: PersistenceError) => void;
+  const promise = new Promise<IDBDatabase>((res, rej) => {
+    resolveDb = res;
+    rejectDb = rej;
+  });
+
+  const pending: PendingDatabaseOpen = {
+    promise,
+    cancelled: false,
+    settled: false,
+    rejected: false,
+    reject: rejectDb,
+    settlePromise,
+    resolveSettle,
+  };
+
+  pendingOpen = pending;
+
+  let request: IDBOpenDBRequest;
+  try {
+    request = indexedDB.open(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION);
+  } catch (error) {
+    pending.settled = true;
+    pending.resolveSettle();
+    if (isCurrentOwner(pending)) {
+      pendingOpen = null;
+    }
+    pending.reject(
+      new PersistenceError("DATABASE_OPEN_FAILED", "Failed to open database.", error),
+    );
+    return promise;
+  }
+
+  request.onupgradeneeded = (_event: IDBVersionChangeEvent) => {
+    const db = request.result;
+    const tx = request.transaction;
+
+    // Create stores only when absent.
+    if (!db.objectStoreNames.contains(STORE_PROJECTS)) {
+      db.createObjectStore(STORE_PROJECTS, { keyPath: "id" });
+    }
+
+    if (!db.objectStoreNames.contains(STORE_FILES)) {
+      const fileStore = db.createObjectStore(STORE_FILES, {
+        keyPath: FILES_KEY_PATH,
+      });
+      if (!fileStore.indexNames.contains(FILES_INDEX_BY_PROJECT)) {
+        fileStore.createIndex(FILES_INDEX_BY_PROJECT, "projectId", {
+          unique: false,
+        });
+      }
+    } else if (tx) {
+      // Obtain the existing files store from the upgrade transaction.
+      const fileStore = tx.objectStore(STORE_FILES);
+      if (!fileStore.indexNames.contains(FILES_INDEX_BY_PROJECT)) {
+        fileStore.createIndex(FILES_INDEX_BY_PROJECT, "projectId", {
+          unique: false,
+        });
+      }
+    }
+
+    if (!db.objectStoreNames.contains(STORE_PREFERENCES)) {
+      db.createObjectStore(STORE_PREFERENCES, { keyPath: "key" });
+    }
+  };
+
+  request.onsuccess = (_event: Event) => {
+    const db = request.result;
+    pending.settled = true;
+    pending.resolveSettle();
+
+    // Verify ownership: only the current pending record may modify global state.
+    if (!isCurrentOwner(pending)) {
+      db.close();
       return;
     }
 
-    request.onupgradeneeded = (_event: IDBVersionChangeEvent) => {
-      const db = request.result;
-      const tx = request.transaction;
+    // If cancelled or already rejected (via onblocked), close without caching.
+    if (shouldDiscardOpen(pending)) {
+      db.close();
+      pendingOpen = null;
+      return;
+    }
 
-      // Create stores only when absent.
-      if (!db.objectStoreNames.contains(STORE_PROJECTS)) {
-        db.createObjectStore(STORE_PROJECTS, { keyPath: "id" });
-      }
-
-      if (!db.objectStoreNames.contains(STORE_FILES)) {
-        const fileStore = db.createObjectStore(STORE_FILES, {
-          keyPath: FILES_KEY_PATH,
-        });
-        if (!fileStore.indexNames.contains(FILES_INDEX_BY_PROJECT)) {
-          fileStore.createIndex(FILES_INDEX_BY_PROJECT, "projectId", {
-            unique: false,
-          });
-        }
-      } else if (tx) {
-        // Obtain the existing files store from the upgrade transaction.
-        const fileStore = tx.objectStore(STORE_FILES);
-        if (!fileStore.indexNames.contains(FILES_INDEX_BY_PROJECT)) {
-          fileStore.createIndex(FILES_INDEX_BY_PROJECT, "projectId", {
-            unique: false,
-          });
-        }
-      }
-
-      if (!db.objectStoreNames.contains(STORE_PREFERENCES)) {
-        db.createObjectStore(STORE_PREFERENCES, { keyPath: "key" });
+    // Close and clear the cached connection when another tab upgrades.
+    db.onversionchange = (_e: IDBVersionChangeEvent) => {
+      db.close();
+      if (dbConnection === db) {
+        dbConnection = null;
       }
     };
 
-    request.onsuccess = (_event: Event) => {
-      const db = request.result;
+    dbConnection = db;
+    pendingOpen = null;
+    resolveDb(db);
+  };
 
-      // If this request already rejected because of blocked, do not
-      // cache a successful connection.
-      if (alreadyRejected) {
-        db.close();
-        return;
-      }
+  request.onerror = (_event: Event) => {
+    pending.settled = true;
+    pending.resolveSettle();
 
-      // Close and clear the cached connection when another tab upgrades.
-      db.onversionchange = (_e: IDBVersionChangeEvent) => {
-        db.close();
-        if (dbConnection === db) {
-          dbConnection = null;
-        }
-      };
+    // Verify ownership.
+    if (!isCurrentOwner(pending)) {
+      return;
+    }
 
-      dbConnection = db;
-      dbOpenPromise = null;
-      resolve(db);
-    };
-
-    request.onerror = (_event: Event) => {
-      alreadyRejected = true;
-      dbOpenPromise = null;
-      dbConnection = null;
-      reject(
+    pendingOpen = null;
+    if (!pending.rejected) {
+      pending.rejected = true;
+      pending.reject(
         new PersistenceError("DATABASE_OPEN_FAILED", "Database open request failed.", request.error),
       );
-    };
+    }
+  };
 
-    request.onblocked = (_event: IDBVersionChangeEvent) => {
-      alreadyRejected = true;
-      dbOpenPromise = null;
-      dbConnection = null;
-      reject(
+  request.onblocked = (_event: IDBVersionChangeEvent) => {
+    // Reject the exposed operation, but the underlying request remains owned
+    // until its eventual success/error. Its later success must be closed.
+    if (isCurrentOwner(pending) && !pending.rejected) {
+      pending.rejected = true;
+      pending.reject(
         new PersistenceError(
           "DATABASE_OPEN_FAILED",
           "Database open blocked by another tab or connection.",
         ),
       );
-    };
-  });
+    }
+    // Do NOT mark settled or clear pendingOpen: the request is still in flight.
+  };
 
-  return dbOpenPromise;
+  return promise;
 }
 
 /**
- * Closes the cached database connection and clears the reference.
- * Safe to call when no connection is open. Does not permit a second
- * parallel open or allow a late connection to escape unnoticed.
+ * Closes the cached database connection and invalidates any pending open.
+ *
+ * If a pending open exists, marks it cancelled and rejects the exposed
+ * promise. The underlying IDB request remains in flight until it settles;
+ * its later onsuccess closes the database without caching or resolving.
+ *
+ * A new open called after this will wait for the old request to settle
+ * before starting, preventing parallel opens.
  */
 export function closeWorkspaceDatabase(): void {
   if (dbConnection) {
     dbConnection.close();
     dbConnection = null;
   }
-  // Clear any pending open promise so a new open can start.
-  dbOpenPromise = null;
+
+  if (pendingOpen) {
+    pendingOpen.cancelled = true;
+    if (!pendingOpen.rejected) {
+      pendingOpen.rejected = true;
+      pendingOpen.reject(
+        new PersistenceError("DATABASE_OPEN_FAILED", "Database open cancelled."),
+      );
+    }
+    // Do NOT clear pendingOpen: the old request is still in flight.
+    // It will be cleared when the request settles (onsuccess/onerror).
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -266,10 +390,16 @@ function now(): number {
 }
 
 /**
- * Validates a project name. Must be trimmed and non-empty, within length limits.
- * Throws INVALID_PROJECT_NAME on failure.
+ * Validates a project name. Must be a string, trimmed and non-empty,
+ * within length limits. Throws INVALID_PROJECT_NAME on failure.
+ *
+ * A non-string runtime value throws a typed INVALID_PROJECT_NAME rather
+ * than an untyped .trim() failure.
  */
-function validateProjectName(name: string): void {
+function validateProjectName(name: unknown): void {
+  if (typeof name !== "string") {
+    throw new PersistenceError("INVALID_PROJECT_NAME", "Project name must be a string.");
+  }
   const trimmed = name.trim();
   if (trimmed.length < MIN_PROJECT_NAME_LENGTH) {
     throw new PersistenceError("INVALID_PROJECT_NAME", "Project name must not be empty.");
@@ -350,17 +480,23 @@ export async function listProjects(): Promise<WorkspaceProject[]> {
 /**
  * Updates a project record using one read-write transaction.
  *
+ * Validates the project name before opening the transaction.
  * Reads the current stored project, throws PROJECT_NOT_FOUND when absent,
  * compares the caller's expected revision with the stored revision,
  * rejects stale writes with REVISION_CONFLICT, derives the next revision
- * from the stored record, preserves immutable identity and creation fields,
- * and increments revision exactly once.
+ * from the stored record, preserves immutable identity and creation fields
+ * (id, createdAt, templateId), stores the trimmed name, and increments
+ * revision exactly once.
+ *
+ * updateProject() cannot change templateId.
  *
  * Returns the updated project.
  */
 export async function updateProject(
   project: WorkspaceProject,
 ): Promise<WorkspaceProject> {
+  validateProjectName(project.name);
+
   const db = await openWorkspaceDatabase();
 
   const tx = db.transaction(STORE_PROJECTS, "readwrite");
@@ -384,11 +520,11 @@ export async function updateProject(
   }
 
   // Derive the next revision from the stored record.
-  // Preserve immutable identity and creation fields.
+  // Preserve immutable identity and creation fields: id, createdAt, templateId.
+  // Do not allow updateProject() to change templateId.
   const updated: WorkspaceProject = {
     ...stored,
-    name: project.name,
-    templateId: project.templateId,
+    name: project.name.trim(),
     activeFile: project.activeFile,
     openTabs: project.openTabs,
     updatedAt: now(),
@@ -586,7 +722,7 @@ export async function putEntry(
 
   const timestamp = now();
 
-  // Construct file and directory records separately — directories must not
+  // Construct file and directory records separately: directories must not
   // have an own contents property.
   let record: WorkspaceFileRecord;
   if (kind === "file") {

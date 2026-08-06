@@ -93,9 +93,9 @@ btn.addEventListener("click", () => {
 `;
 
 const STATIC_SERVER_MJS = `import { createServer } from "node:http";
-import { readFile, stat } from "node:fs/promises";
-import { join, normalize, extname, isAbsolute, relative, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFile, stat, realpath } from "node:fs/promises";
+import { join, normalize, extname, isAbsolute, relative, sep, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -128,9 +128,26 @@ const MIME_TYPES = {
   ".woff2": "font/woff2",
 };
 
+function isInsideRoot(root, target) {
+  const rel = relative(root, target);
+  return (
+    rel !== "" &&
+    !isAbsolute(rel) &&
+    rel !== ".." &&
+    !rel.startsWith(".." + sep)
+  );
+}
+
 function createStaticServer(rootDir) {
   return createServer(async (req, res) => {
-    const url = new URL(req.url, "http://localhost");
+    let url;
+    try {
+      url = new URL(req.url, "http://localhost");
+    } catch {
+      res.writeHead(400);
+      res.end("400 Bad Request");
+      return;
+    }
 
     let pathname;
     try {
@@ -145,20 +162,50 @@ function createStaticServer(rootDir) {
       pathname = "/index.html";
     }
 
-    const filePath = join(rootDir, pathname);
-    const resolvedPath = normalize(filePath);
+    // Step 1: Resolve the configured root to its real path.
+    let realRoot;
+    try {
+      realRoot = await realpath(rootDir);
+    } catch {
+      res.writeHead(500);
+      res.end("500 Internal Server Error");
+      return;
+    }
 
-    // Use relative()/isAbsolute() and separator-aware checks rather than
-    // startsWith(root). Reject paths that escape the project root.
-    const rel = relative(rootDir, resolvedPath);
-    if (rel === "" || isAbsolute(rel) || rel.startsWith("..") || rel.startsWith(".." + sep)) {
+    // Step 2: Resolve the requested target lexically.
+    const lexicalTarget = normalize(join(rootDir, pathname));
+
+    // Step 3: Perform the lexical boundary check.
+    if (!isInsideRoot(realRoot, lexicalTarget)) {
+      res.writeHead(403);
+      res.end("403 Forbidden");
+      return;
+    }
+
+    // Step 4: Resolve the requested target with realpath().
+    let realTarget;
+    try {
+      realTarget = await realpath(lexicalTarget);
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        res.writeHead(404);
+        res.end("404 Not Found");
+      } else {
+        res.writeHead(500);
+        res.end("500 Internal Server Error");
+      }
+      return;
+    }
+
+    // Step 5: Perform the boundary check again against the real root.
+    if (!isInsideRoot(realRoot, realTarget)) {
       res.writeHead(403);
       res.end("403 Forbidden");
       return;
     }
 
     try {
-      const stats = await stat(resolvedPath);
+      const stats = await stat(realTarget);
 
       if (stats.isDirectory()) {
         res.writeHead(403);
@@ -166,8 +213,9 @@ function createStaticServer(rootDir) {
         return;
       }
 
-      const data = await readFile(resolvedPath);
-      const ext = extname(resolvedPath);
+      // Step 6: Read only the verified real target.
+      const data = await readFile(realTarget);
+      const ext = extname(realTarget);
       const mime = MIME_TYPES[ext] || "application/octet-stream";
 
       res.writeHead(200, { "Content-Type": mime });
@@ -193,7 +241,7 @@ function startServer(server, port, host) {
 export { createStaticServer, startServer, parsePort };
 
 // Start listening only when executed as the main module.
-if (import.meta.url === \`file://\${process.argv[1]}\`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const server = createStaticServer(__dirname);
   startServer(server, PORT, HOST);
 }

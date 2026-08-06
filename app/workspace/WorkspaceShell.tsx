@@ -38,6 +38,8 @@ export default function WorkspaceShell() {
     retrying,
     openingProjectId,
     retryAction,
+    creationSuccessVersion,
+    renameSuccessVersion,
     handleCreateProject,
     handleRenameProject,
     handleDeleteProject,
@@ -60,14 +62,15 @@ export default function WorkspaceShell() {
         </div>
       )}
 
-      {/* Fatal startup/database error: full-screen error view */}
+      {/* Fatal startup/database error: full-screen error view.
+          Retry only, no Dismiss. Fatal errors must never create
+          view = error + error = null. */}
       {view === "error" && error && (
         <div className="flex items-center justify-center min-h-[60vh]">
           <ErrorBanner
             error={error}
             onRetry={retry}
             retrying={retrying}
-            onDismiss={dismissError}
           />
         </div>
       )}
@@ -87,6 +90,7 @@ export default function WorkspaceShell() {
             projects={projects}
             creating={creating}
             openingProjectId={openingProjectId}
+            creationSuccessVersion={creationSuccessVersion}
             onCreate={handleCreateProject}
             onOpen={openProjectById}
           />
@@ -110,6 +114,7 @@ export default function WorkspaceShell() {
             renaming={renaming}
             deleting={deleting}
             projectOperationPending={projectOperationPending}
+            renameSuccessVersion={renameSuccessVersion}
             onBack={backToLauncher}
             onRename={(newName) => handleRenameProject(activeProject.id, newName)}
             onDelete={() => handleDeleteProject(activeProject.id)}

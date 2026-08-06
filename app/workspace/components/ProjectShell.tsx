@@ -39,6 +39,7 @@ interface ProjectShellProps {
   renaming: boolean;
   deleting: boolean;
   projectOperationPending: boolean;
+  renameSuccessVersion: number;
   onBack: () => void;
   onRename: (newName: string) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
@@ -50,6 +51,7 @@ export function ProjectShell({
   renaming,
   deleting,
   projectOperationPending,
+  renameSuccessVersion,
   onBack,
   onRename,
   onDelete,
@@ -58,6 +60,18 @@ export function ProjectShell({
   const [renameMode, setRenameMode] = useState(false);
   const [renameValue, setRenameValue] = useState(project.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Close rename mode and sync the displayed name when rename succeeds
+  // (including on retry). Uses the monotonic renameSuccessVersion token
+  // so we detect success without matching project names.
+  // Adjusting state during render is the React-recommended pattern for
+  // syncing local state to a changing prop/external signal.
+  const [lastSeenRenameVersion, setLastSeenRenameVersion] = useState(renameSuccessVersion);
+  if (renameSuccessVersion !== lastSeenRenameVersion) {
+    setLastSeenRenameVersion(renameSuccessVersion);
+    setRenameMode(false);
+    setRenameValue(project.name);
+  }
 
   const tree = useMemo(() => buildFileTree(files), [files]);
 
@@ -68,17 +82,16 @@ export function ProjectShell({
 
   const handleRenameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (renameValue.trim().length === 0 || renaming) return;
+    if (renameValue.trim().length === 0 || renaming || projectOperationPending) return;
 
-    // Close rename mode only after successful rename.
-    const success = await onRename(renameValue);
-    if (success) {
-      setRenameMode(false);
-    }
-    // On failure, rename mode stays open and rename text is preserved.
+    // Rename mode is closed by the renameSuccessVersion effect after
+    // successful rename. On failure, rename mode stays open and the
+    // rename text is preserved.
+    await onRename(renameValue);
   };
 
   const handleDeleteConfirm = async () => {
+    if (projectOperationPending) return;
     // Close delete confirmation only after successful deletion.
     const success = await onDelete();
     if (success) {
@@ -121,12 +134,12 @@ export function ProjectShell({
                 onChange={(e) => setRenameValue(e.target.value)}
                 maxLength={100}
                 autoFocus
-                disabled={renaming}
+                disabled={renaming || projectOperationPending}
                 className="px-2 py-0.5 text-sm text-gray-100 bg-gray-800 border border-gray-600 rounded focus:outline-none focus:border-cyan-600 disabled:opacity-50"
               />
               <button
                 type="submit"
-                disabled={renaming || renameValue.trim().length === 0}
+                disabled={renaming || projectOperationPending || renameValue.trim().length === 0}
                 className="text-xs text-cyan-500 hover:text-cyan-400 disabled:opacity-50"
               >
                 {renaming ? "Saving..." : "Save"}
@@ -137,7 +150,7 @@ export function ProjectShell({
                   setRenameMode(false);
                   setRenameValue(project.name);
                 }}
-                disabled={renaming}
+                disabled={renaming || projectOperationPending}
                 className="text-xs text-gray-500 hover:text-gray-400 disabled:opacity-50"
               >
                 Cancel
@@ -247,7 +260,7 @@ export function ProjectShell({
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setConfirmDelete(false)}
-                disabled={deleting}
+                disabled={deleting || projectOperationPending}
                 className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <X className="w-3.5 h-3.5" />
@@ -255,7 +268,7 @@ export function ProjectShell({
               </button>
               <button
                 onClick={handleDeleteConfirm}
-                disabled={deleting}
+                disabled={deleting || projectOperationPending}
                 className="px-3 py-1.5 text-sm text-white bg-red-700 rounded-md hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {deleting ? "Deleting..." : "Delete"}

@@ -475,7 +475,10 @@ export async function listProjects(): Promise<WorkspaceProject[]> {
   const store = tx.objectStore(STORE_PROJECTS);
   const all = await wrapRequest(store.getAll() as IDBRequest<WorkspaceProject[]>);
 
-  return all.sort((a, b) => a.createdAt - b.createdAt);
+  return all.sort((a, b) => {
+    if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+    return a.id < b.id ? -1 : 1;
+  });
 }
 
 /**

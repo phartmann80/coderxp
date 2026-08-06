@@ -1,7 +1,8 @@
 /**
  * Hierarchical file-tree builder for CoderXP M2 Workspace Alpha.
  *
- * Commit 3 final correction: rebuilt around a single path map.
+ * Final correction (fix(workspace): close final lifecycle races):
+ * Rebuilt around precomputed canonical node kinds.
  *
  * The tree is derived from stored WorkspaceFileRecord paths, not from
  * template constants. Implicit visual parent folders may be derived
@@ -16,11 +17,13 @@
  * - No invented implicit records stored in IndexedDB.
  * - Deterministic regardless of input record order.
  * - Exactly one node per path in a Map<string, FileTreeNode>.
- * - Implicit directory nodes merge with later persisted directory
- *   records rather than creating duplicate nodes.
- * - File/directory path collisions are handled deterministically:
- *   a persisted entry always wins over an implicit one, and the
- *   first persisted kind for a given path is kept.
+ * - A path required as a parent by any descendant must be a directory node.
+ * - A persisted directory record also makes the path a directory.
+ * - Otherwise, a persisted file may occupy the path.
+ * - A conflicting file at a path that must be a directory is defensively
+ *   omitted from the visual tree.
+ * - A file node must never have children.
+ * - Duplicate records must not depend on original array order.
  * - Identical serialized output for every permutation of the same records.
  */
 
@@ -51,31 +54,81 @@ function comparePaths(a: string, b: string): number {
 }
 
 /**
+ * Comparator for deterministic depth-then-string ordering of paths.
+ * Shorter paths (shallower) come first so parents are processed before
+ * children. Ties broken by direct string comparison.
+ */
+function compareDepthThenPath(a: string, b: string): number {
+  const depthA = a.split("/").length;
+  const depthB = b.split("/").length;
+  if (depthA !== depthB) return depthA - depthB;
+  return comparePaths(a, b);
+}
+
+/**
  * Build a hierarchical file tree from persisted file records.
  *
- * Uses a single Map<string, FileTreeNode> keyed by full path to guarantee
- * exactly one node per path. Processing order is canonicalized with a
- * fixed path comparator, not input order. Implicit directories are
- * registered in the map immediately. When a persisted directory later
- * matches an implicit directory, the existing node is upgraded in place.
+ * Precomputes one canonical node kind per path before building the
+ * hierarchy. This guarantees deterministic output regardless of input
+ * record order.
  *
- * Deterministic policies:
- * - A persisted file whose path is also required as a parent directory:
- *   the file wins (it is the leaf entry); the implicit directory at the
- *   same path is not created because the file occupies that path slot.
- * - Defensive duplicate records (same path, same kind): the first
- *   persisted entry for a given path is kept; subsequent duplicates
- *   are skipped.
- * - A persisted directory and a persisted file with the same path:
- *   the first persisted entry wins; the second is skipped.
+ * Canonical kind policy:
+ * 1. A path required as a parent by any descendant must be a directory.
+ * 2. A persisted directory record also makes the path a directory.
+ * 3. Otherwise, a persisted file may occupy the path.
+ * 4. A conflicting file at a path that must be a directory is defensively
+ *    omitted from the visual tree.
+ * 5. A file node must never have children.
+ * 6. Duplicate records (same path, same kind) produce identical output.
  *
- * Directories are sorted before files within each parent. Both groups
- * use direct string comparison by name (not locale-dependent).
+ * Build paths are processed in deterministic depth-then-string order.
  */
 export function buildFileTree(entries: WorkspaceFileRecord[]): FileTreeNode[] {
-  // Canonicalize processing order with a fixed path comparator.
-  // Copy the array (do not mutate the input) and sort by path.
-  const sorted = [...entries].sort((a, b) => comparePaths(a.path, b.path));
+  // --- Phase 1: Precompute canonical node kind per path ---
+
+  // Collect all paths that are required as parent directories.
+  const parentPaths = new Set<string>();
+  for (const entry of entries) {
+    const segments = entry.path.split("/");
+    for (let i = 1; i < segments.length; i++) {
+      parentPaths.add(segments.slice(0, i).join("/"));
+    }
+  }
+
+  // Collect persisted directory paths.
+  const persistedDirPaths = new Set<string>();
+  // Collect persisted file paths (first one wins for duplicates).
+  const persistedFilePaths = new Set<string>();
+  for (const entry of entries) {
+    if (entry.kind === "directory") {
+      persistedDirPaths.add(entry.path);
+    } else {
+      persistedFilePaths.add(entry.path);
+    }
+  }
+
+  // Compute canonical kind for every path.
+  // A path is a directory if:
+  //   - it is required as a parent by any descendant, OR
+  //   - it is a persisted directory.
+  // A path is a file if:
+  //   - it is a persisted file AND not required as a parent AND not a persisted directory.
+  // A conflicting file at a path that must be a directory is omitted.
+  const canonicalKind = new Map<string, "file" | "directory">();
+  const allPaths = new Set<string>([...parentPaths, ...persistedDirPaths, ...persistedFilePaths]);
+
+  for (const path of allPaths) {
+    if (parentPaths.has(path) || persistedDirPaths.has(path)) {
+      canonicalKind.set(path, "directory");
+    } else {
+      canonicalKind.set(path, "file");
+    }
+  }
+
+  // --- Phase 2: Build the tree from canonical kinds ---
+
+  // Process paths in deterministic depth-then-string order.
+  const sortedPaths = [...allPaths].sort(compareDepthThenPath);
 
   // Single map: exactly one node per path.
   const nodeMap = new Map<string, FileTreeNode>();
@@ -89,61 +142,38 @@ export function buildFileTree(entries: WorkspaceFileRecord[]): FileTreeNode[] {
     children: [],
   };
 
-  // Track which paths are persisted directories (for implicit-dir upgrade).
-  const persistedDirPaths = new Set(
-    entries.filter((e) => e.kind === "directory").map((e) => e.path),
-  );
+  for (const path of sortedPaths) {
+    const kind = canonicalKind.get(path)!;
+    const segments = path.split("/");
+    const name = segments[segments.length - 1];
 
-  for (const entry of sorted) {
-    const segments = entry.path.split("/");
-    let current = root;
+    // Determine if this node is persisted.
+    const isPersisted =
+      kind === "directory"
+        ? persistedDirPaths.has(path)
+        : persistedFilePaths.has(path);
 
-    for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      const isLast = i === segments.length - 1;
-      const partialPath = segments.slice(0, i + 1).join("/");
+    const node: FileTreeNode = {
+      name,
+      path,
+      kind,
+      isPersisted,
+      children: [],
+    };
+    nodeMap.set(path, node);
 
-      if (isLast) {
-        // This is the actual entry (file or persisted directory).
-        // Skip if we've already inserted a node for this exact path
-        // (collision detection: first entry wins, no duplicates).
-        if (nodeMap.has(partialPath)) {
-          // Defensive duplicate: skip.
-          continue;
-        }
-
-        const node: FileTreeNode = {
-          name: segment,
-          path: partialPath,
-          kind: entry.kind,
-          isPersisted: true,
-          children: [],
-        };
-        nodeMap.set(partialPath, node);
-        current.children.push(node);
+    // Attach to parent.
+    if (segments.length === 1) {
+      root.children.push(node);
+    } else {
+      const parentPath = segments.slice(0, -1).join("/");
+      const parent = nodeMap.get(parentPath);
+      if (parent) {
+        parent.children.push(node);
       } else {
-        // This is an intermediate path segment: may be an implicit directory
-        // or a previously inserted persisted directory.
-        let child = nodeMap.get(partialPath);
-
-        if (!child) {
-          // Create an implicit directory node and register it in the map.
-          child = {
-            name: segment,
-            path: partialPath,
-            kind: "directory",
-            isPersisted: persistedDirPaths.has(partialPath),
-            children: [],
-          };
-          nodeMap.set(partialPath, child);
-          current.children.push(child);
-        } else if (!child.isPersisted && persistedDirPaths.has(partialPath)) {
-          // Upgrade an implicit directory node to persisted when a
-          // persisted directory record exists for this path.
-          child.isPersisted = true;
-        }
-
-        current = child;
+        // Parent should exist because we process in depth order.
+        // Defensive: attach to root if parent is somehow missing.
+        root.children.push(node);
       }
     }
   }

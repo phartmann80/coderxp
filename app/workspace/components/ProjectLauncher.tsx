@@ -35,13 +35,25 @@ interface ProjectLauncherProps {
   projects: WorkspaceProject[];
   creating: boolean;
   openingProjectId: string | null;
+  creationSuccessVersion: number;
   onCreate: (name: string, templateId: ProjectTemplateId) => Promise<boolean>;
   onOpen: (projectId: string) => void;
 }
 
-export function ProjectLauncher({ projects, creating, openingProjectId, onCreate, onOpen }: ProjectLauncherProps) {
+export function ProjectLauncher({ projects, creating, openingProjectId, creationSuccessVersion, onCreate, onOpen }: ProjectLauncherProps) {
   const [name, setName] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplateId>("static-html");
+
+  // Clear the name input when creation succeeds (including on retry).
+  // Uses the monotonic creationSuccessVersion token so we detect success
+  // without matching project names (duplicate names are allowed).
+  // Adjusting state during render is the React-recommended pattern for
+  // syncing local state to a changing prop/external signal.
+  const [lastSeenVersion, setLastSeenVersion] = useState(creationSuccessVersion);
+  if (creationSuccessVersion !== lastSeenVersion) {
+    setLastSeenVersion(creationSuccessVersion);
+    setName("");
+  }
 
   // Creation is disabled while creating or while a project is opening.
   const canCreate = name.trim().length > 0 && !creating && openingProjectId === null;
@@ -50,12 +62,10 @@ export function ProjectLauncher({ projects, creating, openingProjectId, onCreate
     e.preventDefault();
     if (!canCreate) return;
 
-    // Clear the name input only after successful creation.
-    const success = await onCreate(name, selectedTemplate);
-    if (success) {
-      setName("");
-    }
-    // On failure, the entered project name and selected template are preserved.
+    // The name input is cleared by the creationSuccessVersion effect
+    // after successful creation. On failure, the entered project name
+    // and selected template are preserved.
+    await onCreate(name, selectedTemplate);
   };
 
   const formatDate = (timestamp: number) => {

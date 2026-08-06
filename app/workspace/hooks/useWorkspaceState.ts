@@ -3,36 +3,47 @@
 /**
  * Workspace state hook for CoderXP M2 Workspace Alpha.
  *
- * Final correction scope (fix(workspace): finalize lifecycle state integrity):
+ * Final correction (fix(workspace): close final lifecycle races):
  *
- * 1. Separate committed mutations from follow-up UI work:
- *    Once an IndexedDB mutation resolves, treat it as committed and
- *    successful. Never retry the same mutation because a later UI
- *    refresh or project-open step failed.
+ * 1. Replace the project-open string lock with owned operation state:
+ *    Uses a PendingProjectOpen record with token, promise, cancelled.
+ *    The first open owns the operation. Repeated requests for the same
+ *    project return the same promise. Requests for another project do
+ *    not start a second IndexedDB sequence. finally releases the lock
+ *    when the exact pending record still owns it. Generation changes
+ *    must not strand the lock. A cancelled or stale operation may not
+ *    update state or preference.
  *
- * 2. Fix active-project startup failure:
- *    A saved active-project open failure during startup must never
- *    remain in the loading view. On failure: view = launcher, project
- *    list visible, controlled error visible, retryAction = openProject.
+ * 2. Fix fatal error dismissal:
+ *    For view === "error", do not pass a dismiss action. Fatal
+ *    startup/database errors must show Retry only.
  *
- * 3. Implement truthful single-flight project opening:
- *    Only one project-open sequence may run at a time. Repeated clicks
- *    for the same project share or reject. Different project buttons
- *    are disabled while opening. Creation is disabled while opening.
+ * 3. Fully separate committed mutations from follow-up work:
+ *    Creation: release creation lock before opening. Do not keep
+ *    "Creating..." active while project opening runs.
+ *    Rename: remove reconciliation reloadProjects() call.
+ *    Delete: remove reconciliation reloadProjects() call.
  *
- * 4. Add a real retry-pending contract:
- *    retry() is async and awaits the exact operation. While retrying:
- *    Retry is disabled, Dismiss is disabled, relevant controls disabled.
- *    WorkspaceShell shows Retry only when a retry action exists.
+ * 4. Synchronize retry success with local form state:
+ *    Uses creationSuccessVersion and renameSuccessVersion monotonic
+ *    tokens so the UI can detect successful retries without matching
+ *    project names.
  *
- * 5. Use one cross-operation lock in the project shell:
- *    Rename and delete must never overlap. A unified projectOperationPending
- *    value is passed to ProjectShell.
+ * 5. Keep the retry action until settlement:
+ *    Capture the action being retried and retain it while retrying === true.
+ *    Clear only when the exact retry succeeds, user dismisses, or a
+ *    replacement failure installs a new retry action.
  *
- * 6. Make back navigation synchronous and safe:
- *    backToLauncher() does not depend on a database reload. It
- *    invalidates stale open generation, clears state, and sets view
- *    to launcher immediately.
+ * 6. Apply the unified lock to every project-shell control:
+ *    While projectOperationPending is true, disable Back, Rename start,
+ *    Delete start, Rename input, Rename Save, Rename Cancel,
+ *    Delete confirmation Cancel, Delete confirmation Delete.
+ *
+ * 7. Make back navigation synchronous and safe:
+ *    backToLauncher() does not depend on a database reload.
+ *
+ * 8. Deterministic project ordering:
+ *    createdAt ascending, id ascending as tie-breaker.
  *
  * Does not fabricate projects, files, loading progress, or success states.
  * Avoids state updates after component unmount.
@@ -83,20 +94,12 @@ export interface RetryAction {
   templateId?: ProjectTemplateId;
 }
 
-/** Full workspace state exposed to components. */
-export interface WorkspaceState {
-  view: WorkspaceView;
-  projects: WorkspaceProject[];
-  activeProject: WorkspaceProject | null;
-  activeProjectFiles: WorkspaceFileRecord[];
-  error: WorkspaceError | null;
-  persistenceAvailable: boolean;
-  creating: boolean;
-  renaming: boolean;
-  deleting: boolean;
-  retrying: boolean;
-  openingProjectId: string | null;
-  retryAction: RetryAction | null;
+/** Pending project-open operation record for single-flight ownership. */
+interface PendingProjectOpen {
+  token: symbol;
+  projectId: string;
+  promise: Promise<WorkspaceProject | null>;
+  cancelled: boolean;
 }
 
 /** Controlled error messages for each known code. */
@@ -131,14 +134,16 @@ export function useWorkspaceState() {
   const [retrying, setRetrying] = useState(false);
   const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
   const [retryAction, setRetryAction] = useState<RetryAction | null>(null);
+  const [creationSuccessVersion, setCreationSuccessVersion] = useState(0);
+  const [renameSuccessVersion, setRenameSuccessVersion] = useState(0);
 
   const mountedRef = useRef(true);
 
   // --- Operation-generation token for stale async project opens ---
   const openGenerationRef = useRef(0);
 
-  // --- Single-flight project opening ownership guard ---
-  const openingRef = useRef<string | null>(null);
+  // --- Single-flight project opening ownership: PendingProjectOpen record ---
+  const pendingOpenRef = useRef<PendingProjectOpen | null>(null);
 
   // --- Retry-pending synchronous guard ---
   const retryingRef = useRef(false);
@@ -220,29 +225,46 @@ export function useWorkspaceState() {
   /**
    * Open a project by ID: loads project record and its file entries.
    *
-   * Single-flight: only one project-open sequence may run at a time.
-   * Repeated clicks for the same project share the current operation.
-   * Different project clicks are rejected while another open is running.
-   *
-   * Uses an operation-generation token so stale results are discarded.
-   * The active-project preference is written only by the owned open.
+   * Single-flight using a PendingProjectOpen record:
+   * - The first open owns the operation.
+   * - Repeated requests for the same project return the same promise.
+   * - Requests for another project do not start a second IndexedDB sequence.
+   * - finally releases the lock when the exact pending record still owns it.
+   * - Generation changes must not strand the lock.
+   * - A cancelled or stale operation may not update state or preference.
    *
    * Returns the project on success, or null on failure/unmount/rejection.
    */
   const openProject = useCallback(
     async (projectId: string): Promise<WorkspaceProject | null> => {
-      // Single-flight: if an open is already in flight for this project,
-      // return null (the existing operation will handle it).
-      if (openingRef.current !== null) {
+      // If an open is already in flight, check ownership.
+      const existing = pendingOpenRef.current;
+      if (existing) {
+        // Same project: return the same promise (shared operation).
+        if (existing.projectId === projectId) {
+          return existing.promise;
+        }
+        // Different project: do not start a second sequence.
         return null;
       }
 
-      // Claim ownership.
-      openingRef.current = projectId;
-      setOpeningProjectId(projectId);
-
-      // Assign a new generation token for this open request.
+      // Claim ownership with a new PendingProjectOpen record.
+      const token = Symbol("projectOpen");
       const generation = ++openGenerationRef.current;
+
+      let resolveOpen!: (project: WorkspaceProject | null) => void;
+      const openPromise = new Promise<WorkspaceProject | null>((res) => {
+        resolveOpen = res;
+      });
+
+      const pending: PendingProjectOpen = {
+        token,
+        projectId,
+        promise: openPromise,
+        cancelled: false,
+      };
+      pendingOpenRef.current = pending;
+      setOpeningProjectId(projectId);
 
       try {
         const project = await getProject(projectId);
@@ -250,18 +272,30 @@ export function useWorkspaceState() {
 
         // Stale check: discard if a newer open request has started.
         if (generation !== openGenerationRef.current) {
+          pending.cancelled = true;
+          resolveOpen(null);
           return null;
         }
-        if (!mountedRef.current) return null;
+        if (!mountedRef.current) {
+          pending.cancelled = true;
+          resolveOpen(null);
+          return null;
+        }
 
         // Write the active-project preference before updating view.
         await setActiveProjectId(projectId);
 
         // Stale check again after the async preference write.
         if (generation !== openGenerationRef.current) {
+          pending.cancelled = true;
+          resolveOpen(null);
           return null;
         }
-        if (!mountedRef.current) return null;
+        if (!mountedRef.current) {
+          pending.cancelled = true;
+          resolveOpen(null);
+          return null;
+        }
 
         // Only the owned open may update state.
         setActiveProject(project);
@@ -270,28 +304,38 @@ export function useWorkspaceState() {
         setError(null);
         setRetryAction(null);
         setView("project");
+        resolveOpen(project);
         return project;
       } catch (err) {
         // Stale check: discard error from an older request.
         if (generation !== openGenerationRef.current) {
+          pending.cancelled = true;
+          resolveOpen(null);
           return null;
         }
-        if (!mountedRef.current) return null;
+        if (!mountedRef.current) {
+          pending.cancelled = true;
+          resolveOpen(null);
+          return null;
+        }
 
         const we = toWorkspaceError(err);
         setError(we);
         setRetryAction({ type: "openProject", projectId });
         // Do NOT switch to "error" view: preserve the current view
         // (launcher or currently open project).
+        resolveOpen(null);
         return null;
       } finally {
-        // Release ownership.
-        if (generation === openGenerationRef.current) {
-          openingRef.current = null;
+        // Release ownership: only if this exact pending record still owns it.
+        if (pendingOpenRef.current === pending) {
+          pendingOpenRef.current = null;
           if (mountedRef.current) {
             setOpeningProjectId(null);
           }
         }
+        // Ensure the promise is resolved even if we somehow missed it.
+        // (resolveOpen is always called in the try/catch above.)
       }
     },
     [toWorkspaceError],
@@ -338,9 +382,7 @@ export function useWorkspaceState() {
         if (found) {
           // Attempt to open the active project.
           // Note: openProject increments openGenerationRef internally, so
-          // we must NOT check generation against openGenerationRef here —
-          // that would always fail and leave the user stuck on "Loading
-          // workspace…" when the saved active project fails to open.
+          // we must NOT check generation against openGenerationRef here.
           const result = await openProject(activeId);
           if (!mountedRef.current) return;
           if (!result) {
@@ -377,13 +419,16 @@ export function useWorkspaceState() {
   /**
    * Create a new project from a template.
    *
-   * Once createProjectFromTemplate() resolves, the project is committed.
-   * Add the returned project to projects state directly using deterministic
-   * ordering. Return creation success so the launcher may clear the name.
-   * Attempt to open the newly created project separately. If opening
-   * fails, remain on the launcher with the newly created project visible.
-   * Set Retry to openProject for that new project ID. Never set Retry
-   * back to createProject. Retrying must not create a duplicate project.
+   * Once createProjectFromTemplate() resolves:
+   * - Insert the returned project into state.
+   * - Mark creation successful (increment creationSuccessVersion).
+   * - Resolve handleCreateProject() with true immediately so the name
+   *   field clears.
+   * - Release the creation lock.
+   * - Start the project-open operation separately.
+   * - Opening failure must create an openProject retry, never a
+   *   createProject retry.
+   * - Do not keep "Creating..." active while project opening runs.
    *
    * Returns true on creation success, false on creation failure.
    */
@@ -404,9 +449,17 @@ export function useWorkspaceState() {
         // The mutation has committed. Add the project to state directly.
         insertProjectOrdered(project);
 
-        // Creation succeeded: return true so the launcher clears the name.
-        // Attempt to open the newly created project separately.
-        // Use the actual result returned by openProject().
+        // Mark creation successful so the launcher clears the name field.
+        setCreationSuccessVersion((v) => v + 1);
+
+        // Release the creation lock before starting the open.
+        creatingRef.current = false;
+        if (mountedRef.current) {
+          setCreating(false);
+        }
+
+        // Start the project-open operation separately.
+        // Do not keep "Creating..." active while project opening runs.
         const openResult = await openProject(project.id);
         if (!mountedRef.current) return true;
 
@@ -415,9 +468,7 @@ export function useWorkspaceState() {
           // Remain on launcher with the new project visible.
           // Retry is set to openProject (by openProject's catch), not createProject.
           // Ensure we are on the launcher view.
-          if (view !== "project") {
-            setView("launcher");
-          }
+          setView((currentView) => (currentView === "project" ? currentView : "launcher"));
         }
 
         return true;
@@ -428,23 +479,26 @@ export function useWorkspaceState() {
         // Do NOT switch to "error" view: launcher stays visible.
         return false;
       } finally {
-        creatingRef.current = false;
-        if (mountedRef.current) {
-          setCreating(false);
+        // Only release if we haven't already (creation success path releases early).
+        if (creatingRef.current) {
+          creatingRef.current = false;
+          if (mountedRef.current) {
+            setCreating(false);
+          }
         }
       }
     },
-    [insertProjectOrdered, openProject, toWorkspaceError, view],
+    [insertProjectOrdered, openProject, toWorkspaceError],
   );
 
   /**
    * Rename the active project.
    *
-   * Once renameProject() resolves, the rename is committed.
-   * Update activeProject directly. Replace the matching project in
-   * projects state directly. Close rename mode. Do not require
-   * reloadProjects() for success. Never retry the rename because a
-   * later list refresh failed.
+   * Once renameProject() resolves:
+   * - Update the active project and project list directly.
+   * - Return success immediately.
+   * - Remove the reconciliation reloadProjects() call.
+   * - Increment renameSuccessVersion so the UI can detect success.
    *
    * Returns true on success, false on failure.
    */
@@ -466,16 +520,10 @@ export function useWorkspaceState() {
         setActiveProject(updated);
         replaceProjectInState(updated);
 
-        // Optional reconciliation read (separate from mutation success).
-        // This is best-effort and does not affect the mutation's success.
-        try {
-          await reloadProjects();
-        } catch {
-          // Reconciliation read failed; mutation already succeeded.
-          // Do not retry the rename.
-        }
+        // Signal success so the UI closes rename mode and syncs the name.
+        setRenameSuccessVersion((v) => v + 1);
 
-        if (!mountedRef.current) return true;
+        // No reconciliation reloadProjects() call.
         return true;
       } catch (err) {
         if (!mountedRef.current) return false;
@@ -490,18 +538,17 @@ export function useWorkspaceState() {
         }
       }
     },
-    [replaceProjectInState, reloadProjects, toWorkspaceError],
+    [replaceProjectInState, toWorkspaceError],
   );
 
   /**
    * Delete a project with confirmation.
    *
-   * Once deleteProject() resolves, the deletion is committed.
-   * Filter the deleted project from projects state directly.
-   * Clear the active project and files. Switch to the launcher
-   * immediately. Clear the successful delete's error and retry state.
-   * Do not require reloadProjects() before rendering the launcher.
-   * Never retry deletion after the original deletion committed.
+   * Once deleteProject() resolves:
+   * - Filter state.
+   * - Switch to the launcher.
+   * - Return success immediately.
+   * - Remove the reconciliation reloadProjects() call.
    *
    * Returns true on success, false on failure.
    */
@@ -529,15 +576,7 @@ export function useWorkspaceState() {
         // Switch to launcher immediately.
         setView("launcher");
 
-        // Optional reconciliation read (separate from mutation success).
-        try {
-          await reloadProjects();
-        } catch {
-          // Reconciliation read failed; mutation already succeeded.
-          // Do not retry the deletion.
-        }
-
-        if (!mountedRef.current) return true;
+        // No reconciliation reloadProjects() call.
         return true;
       } catch (err) {
         if (!mountedRef.current) return false;
@@ -552,7 +591,7 @@ export function useWorkspaceState() {
         }
       }
     },
-    [filterProjectFromState, reloadProjects, toWorkspaceError],
+    [filterProjectFromState, toWorkspaceError],
   );
 
   /**
@@ -570,8 +609,11 @@ export function useWorkspaceState() {
   const backToLauncher = useCallback(() => {
     // Cancel any in-flight open by bumping the generation.
     openGenerationRef.current++;
-    // Clear the single-flight ownership.
-    openingRef.current = null;
+    // Cancel the pending open record.
+    if (pendingOpenRef.current) {
+      pendingOpenRef.current.cancelled = true;
+      pendingOpenRef.current = null;
+    }
     setOpeningProjectId(null);
     setActiveProject(null);
     setActiveProjectFiles([]);
@@ -587,11 +629,16 @@ export function useWorkspaceState() {
    * While retrying: Retry is disabled, Dismiss is disabled, relevant
    * create/open/rename/delete controls are disabled.
    * Repeated Retry clicks do not start another operation.
-   * The retry action is cleared only after success, explicit dismissal,
-   * or replacement by a new failure.
+   * The retry action is retained while retrying === true and cleared only
+   * when the exact retry succeeds, the user explicitly dismisses, or a
+   * replacement failure installs a new retry action.
+   * A guard rejection or stale/cancelled operation must not silently
+   * erase Retry.
    */
   const retry = useCallback(async () => {
-    if (!retryAction) return;
+    // Capture the action being retried.
+    const action = retryAction;
+    if (!action) return;
     // Synchronous guard: prevent overlapping retries.
     if (retryingRef.current) return;
     retryingRef.current = true;
@@ -599,42 +646,57 @@ export function useWorkspaceState() {
     setRetrying(true);
 
     try {
-      switch (retryAction.type) {
+      switch (action.type) {
         case "startup": {
-          setError(null);
-          setRetryAction(null);
-          setView("loading");
           await startup();
+          // startup sets its own error/retryAction on failure.
+          // On success, startup clears error/retryAction.
           break;
         }
         case "openProject": {
-          if (retryAction.projectId) {
-            setError(null);
-            setRetryAction(null);
-            await openProject(retryAction.projectId);
+          if (action.projectId) {
+            const result = await openProject(action.projectId);
+            // openProject sets error/retryAction on failure.
+            // On success, openProject clears error/retryAction.
+            // Only clear our captured action on success.
+            if (result) {
+              setError(null);
+              setRetryAction(null);
+            }
           }
           break;
         }
         case "createProject": {
-          if (retryAction.name && retryAction.templateId) {
-            setError(null);
-            // Do NOT clear retryAction yet: handleCreateProject will
-            // clear it on success or set a new one on failure.
-            await handleCreateProject(retryAction.name, retryAction.templateId);
+          if (action.name && action.templateId) {
+            const success = await handleCreateProject(action.name, action.templateId);
+            // handleCreateProject sets error/retryAction on failure.
+            // On success, it clears error/retryAction.
+            if (success) {
+              setError(null);
+              setRetryAction(null);
+            }
           }
           break;
         }
         case "renameProject": {
-          if (retryAction.projectId && retryAction.name) {
-            setError(null);
-            await handleRenameProject(retryAction.projectId, retryAction.name);
+          if (action.projectId && action.name) {
+            const success = await handleRenameProject(action.projectId, action.name);
+            // handleRenameProject sets error/retryAction on failure.
+            if (success) {
+              setError(null);
+              setRetryAction(null);
+            }
           }
           break;
         }
         case "deleteProject": {
-          if (retryAction.projectId) {
-            setError(null);
-            await handleDeleteProject(retryAction.projectId);
+          if (action.projectId) {
+            const success = await handleDeleteProject(action.projectId);
+            // handleDeleteProject sets error/retryAction on failure.
+            if (success) {
+              setError(null);
+              setRetryAction(null);
+            }
           }
           break;
         }
@@ -666,6 +728,8 @@ export function useWorkspaceState() {
     retrying,
     openingProjectId,
     retryAction,
+    creationSuccessVersion,
+    renameSuccessVersion,
     handleCreateProject,
     handleRenameProject,
     handleDeleteProject,

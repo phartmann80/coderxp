@@ -1073,6 +1073,9 @@ export async function createProjectFromTemplate(
 ): Promise<WorkspaceProject> {
   validateProjectName(name);
 
+  // --- PREFLIGHT: all validation before opening any transaction ---
+
+  // 1. Retrieve and verify the available template.
   const template = getTemplate(templateId);
   if (!template || !template.available) {
     throw new PersistenceError(
@@ -1081,17 +1084,59 @@ export async function createProjectFromTemplate(
     );
   }
 
-  const db = await openWorkspaceDatabase();
+  // 2. Confirm the template contains only valid file definitions.
+  if (!Array.isArray(template.files) || template.files.length === 0) {
+    throw new PersistenceError(
+      "TEMPLATE_UNAVAILABLE",
+      `Template has no file definitions: ${templateId}`,
+    );
+  }
 
+  for (const file of template.files) {
+    if (!file || typeof file.path !== "string" || typeof file.contents !== "string") {
+      throw new PersistenceError(
+        "TEMPLATE_UNAVAILABLE",
+        `Template contains an invalid file definition: ${templateId}`,
+      );
+    }
+  }
+
+  // 3. Normalize and validate every template path.
+  const normalizedPaths: string[] = [];
+  for (const file of template.files) {
+    const normalisedPath = normalizeAndValidateWorkspacePath(file.path);
+    normalizedPaths.push(normalisedPath);
+  }
+
+  // 4. Reject duplicate normalized paths with a typed error.
+  const seenPaths = new Set<string>();
+  for (const p of normalizedPaths) {
+    if (seenPaths.has(p)) {
+      throw new PersistenceError(
+        "TEMPLATE_UNAVAILABLE",
+        `Template contains duplicate path: ${p}`,
+      );
+    }
+    seenPaths.add(p);
+  }
+
+  // 5. Build the complete file-record seed list.
   const timestamp = now();
   const projectId = crypto.randomUUID();
   const trimmedName = name.trim();
 
-  // Determine the initial active file: prefer index.html, else first file.
-  const initialActiveFile =
-    template.files.find((f) => f.path === "index.html")?.path ??
-    template.files[0]?.path ??
-    null;
+  const fileRecords: WorkspaceFileRecord[] = normalizedPaths.map((p, i) => ({
+    projectId,
+    path: p,
+    kind: "file" as const,
+    contents: template.files[i].contents,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }));
+
+  // 6. Determine activeFile from the normalized seed paths.
+  const indexHtmlPath = normalizedPaths.find((p) => p === "index.html");
+  const initialActiveFile = indexHtmlPath ?? normalizedPaths[0] ?? null;
 
   const project: WorkspaceProject = {
     id: projectId,
@@ -1104,7 +1149,10 @@ export async function createProjectFromTemplate(
     revision: 1,
   };
 
-  // One read-write transaction across projects, files, and preferences.
+  // --- TRANSACTION: only writes, no validation that can throw ---
+
+  const db = await openWorkspaceDatabase();
+
   const tx = db.transaction(
     [STORE_PROJECTS, STORE_FILES, STORE_PREFERENCES],
     "readwrite",
@@ -1114,28 +1162,30 @@ export async function createProjectFromTemplate(
   const fileStore = tx.objectStore(STORE_FILES);
   const prefStore = tx.objectStore(STORE_PREFERENCES);
 
-  // Insert the project record.
-  projectStore.add(project);
+  try {
+    // Insert the project record (add, not put: duplicate key aborts).
+    projectStore.add(project);
 
-  // Insert all template file records.
-  for (const file of template.files) {
-    const normalisedPath = normalizeAndValidateWorkspacePath(file.path);
-    const record: WorkspaceFileRecord = {
-      projectId,
-      path: normalisedPath,
-      kind: "file",
-      contents: file.contents,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    fileStore.put(record);
+    // Insert all template file records (add, not put: duplicate key aborts).
+    for (const record of fileRecords) {
+      fileStore.add(record);
+    }
+
+    // Set the active project preference.
+    prefStore.put({
+      key: PREF_ACTIVE_PROJECT_ID,
+      value: projectId,
+    } satisfies WorkspacePreferenceRecord);
+  } catch (syncError) {
+    // If a synchronous error occurs after the transaction starts,
+    // explicitly abort before rethrowing.
+    try {
+      tx.abort();
+    } catch {
+      // Abort may throw if already aborted; ignore.
+    }
+    throw syncError;
   }
-
-  // Set the active project preference.
-  prefStore.put({
-    key: PREF_ACTIVE_PROJECT_ID,
-    value: projectId,
-  } satisfies WorkspacePreferenceRecord);
 
   await wrapTransaction(tx);
   return project;

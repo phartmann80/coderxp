@@ -14,6 +14,12 @@
  * - Correct segment-boundary nesting.
  * - No path mutation.
  * - No invented implicit records stored in IndexedDB.
+ * - Deterministic regardless of input record order.
+ * - Implicit directory nodes merge with later persisted directory
+ *   records rather than creating duplicate nodes.
+ * - File/directory path collisions are handled deterministically:
+ *   a persisted entry always wins over an implicit one, and the
+ *   first persisted kind for a given path is kept.
  */
 
 import type { WorkspaceFileRecord } from "./types";
@@ -39,6 +45,14 @@ export interface FileTreeNode {
  * corresponding persisted directory record. These implicit nodes have
  * isPersisted = false so the UI can distinguish them from real entries.
  *
+ * When an implicit directory node is created first and a persisted
+ * directory record for the same path arrives later, the existing node
+ * is upgraded (isPersisted set to true) rather than creating a duplicate.
+ *
+ * File/directory path collisions are handled deterministically: the
+ * first entry to claim a path wins, and subsequent entries for the
+ * same path are skipped (no duplicate nodes).
+ *
  * Directories are sorted before files within each parent. Both groups
  * use stable alphabetical ordering by name.
  */
@@ -56,6 +70,10 @@ export function buildFileTree(entries: WorkspaceFileRecord[]): FileTreeNode[] {
     entries.filter((e) => e.kind === "directory").map((e) => e.path),
   );
 
+  // Track all paths we've already inserted as final nodes to detect
+  // file/directory collisions and avoid duplicate nodes.
+  const insertedPaths = new Set<string>();
+
   // Insert each file record into the tree.
   for (const entry of entries) {
     const segments = entry.path.split("/");
@@ -68,6 +86,13 @@ export function buildFileTree(entries: WorkspaceFileRecord[]): FileTreeNode[] {
 
       if (isLast) {
         // This is the actual entry (file or persisted directory).
+        // Skip if we've already inserted a node for this exact path
+        // (collision detection: first entry wins, no duplicates).
+        if (insertedPaths.has(partialPath)) {
+          continue;
+        }
+        insertedPaths.add(partialPath);
+
         current.children.push({
           name: segment,
           path: partialPath,
@@ -76,7 +101,8 @@ export function buildFileTree(entries: WorkspaceFileRecord[]): FileTreeNode[] {
           children: [],
         });
       } else {
-        // This is an intermediate path segment — may be an implicit directory.
+        // This is an intermediate path segment — may be an implicit directory
+        // or a previously inserted persisted directory.
         let child = current.children.find(
           (c) => c.name === segment && c.kind === "directory",
         );
@@ -90,6 +116,10 @@ export function buildFileTree(entries: WorkspaceFileRecord[]): FileTreeNode[] {
             children: [],
           };
           current.children.push(child);
+        } else if (!child.isPersisted && persistedDirPaths.has(partialPath)) {
+          // Upgrade an implicit directory node to persisted when a
+          // persisted directory record exists for this path.
+          child.isPersisted = true;
         }
 
         current = child;

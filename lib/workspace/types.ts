@@ -131,6 +131,58 @@ export class PersistenceError extends Error {
   }
 }
 
+/**
+ * Allowlist of all valid PersistenceErrorCode values.
+ * Used to verify that an unknown error object carries a trusted code
+ * before accepting it as a PersistenceError.
+ */
+export const PERSISTENCE_ERROR_CODES: readonly PersistenceErrorCode[] = [
+  "PERSISTENCE_UNAVAILABLE",
+  "DATABASE_OPEN_FAILED",
+  "PROJECT_NOT_FOUND",
+  "ENTRY_NOT_FOUND",
+  "ENTRY_CONFLICT",
+  "REVISION_CONFLICT",
+  "INVALID_PROJECT_NAME",
+  "INVALID_PATH",
+  "INVALID_ENTRY",
+  "QUOTA_EXCEEDED",
+  "TRANSACTION_FAILED",
+  "TEMPLATE_UNAVAILABLE",
+];
+
+/**
+ * Returns true when `err` is a trusted PersistenceError instance,
+ * or an object whose `code` is in the PERSISTENCE_ERROR_CODES allowlist.
+ */
+export function isPersistenceError(err: unknown): boolean {
+  if (err instanceof PersistenceError) {
+    return true;
+  }
+  if (err && typeof err === "object" && "code" in err) {
+    const code = (err as { code: unknown }).code;
+    return (PERSISTENCE_ERROR_CODES as readonly string[]).includes(code as string);
+  }
+  return false;
+}
+
+/**
+ * Extracts a trusted PersistenceErrorCode from an unknown error,
+ * or returns null if the error is not a recognized persistence error.
+ */
+export function getPersistenceErrorCode(err: unknown): PersistenceErrorCode | null {
+  if (err instanceof PersistenceError) {
+    return err.code;
+  }
+  if (err && typeof err === "object" && "code" in err) {
+    const code = (err as { code: unknown }).code;
+    if ((PERSISTENCE_ERROR_CODES as readonly string[]).includes(code as string)) {
+      return code as PersistenceErrorCode;
+    }
+  }
+  return null;
+}
+
 /** Template availability metadata. */
 export interface TemplateMetadata {
   /** Template identifier. */

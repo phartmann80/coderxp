@@ -3,8 +3,12 @@
 /**
  * Open-project shell for CoderXP M2 Workspace Alpha.
  *
- * Commit 3 scope: read-only project view with file tree, project info,
- * rename, delete with confirmation, and file selection summary.
+ * Commit 3 correction scope:
+ * - Rename mode closes only after successful rename (correction 4).
+ * - Rename text remains available after failure.
+ * - Delete confirmation closes only after successful deletion.
+ * - Selected-file summary shows the actual stored kind (file/directory)
+ *   (correction 7).
  *
  * Does NOT include:
  * - CodeMirror or editable file contents
@@ -19,6 +23,7 @@ import {
   Trash2,
   X,
   File as FileIcon,
+  Folder,
 } from "lucide-react";
 import type { WorkspaceProject, WorkspaceFileRecord } from "@/lib/workspace/types";
 import { buildFileTree } from "@/lib/workspace/project-tree";
@@ -30,8 +35,8 @@ interface ProjectShellProps {
   renaming: boolean;
   deleting: boolean;
   onBack: () => void;
-  onRename: (newName: string) => void;
-  onDelete: () => void;
+  onRename: (newName: string) => Promise<boolean>;
+  onDelete: () => Promise<boolean>;
 }
 
 export function ProjectShell({
@@ -55,16 +60,27 @@ export function ProjectShell({
     [files, selectedPath],
   );
 
-  const handleRenameSubmit = (e: React.FormEvent) => {
+  const handleRenameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (renameValue.trim().length === 0 || renaming) return;
-    onRename(renameValue);
-    setRenameMode(false);
+
+    // Correction 4: close rename mode only after successful rename.
+    // The onRename callback returns a promise that resolves to true/false.
+    const success = await onRename(renameValue);
+    if (success) {
+      setRenameMode(false);
+    }
+    // On failure, rename mode stays open and rename text is preserved.
   };
 
-  const handleDeleteConfirm = () => {
-    onDelete();
-    setConfirmDelete(false);
+  const handleDeleteConfirm = async () => {
+    // Correction 4: close delete confirmation only after successful deletion.
+    // The onDelete callback returns a promise that resolves to true/false.
+    const success = await onDelete();
+    if (success) {
+      setConfirmDelete(false);
+    }
+    // On failure, the confirmation modal stays open with the project context.
   };
 
   const getFileKind = (path: string): string => {
@@ -80,7 +96,7 @@ export function ProjectShell({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3.5rem)]">
+    <div className="flex flex-col flex-1 overflow-hidden">
       {/* Project header bar */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-800 bg-gray-900/50">
         <div className="flex items-center gap-3">
@@ -180,11 +196,19 @@ export function ProjectShell({
           {selectedFile ? (
             <div className="space-y-3">
               <div className="flex items-center gap-2">
-                <FileIcon className="w-4 h-4 text-gray-500" />
+                {selectedFile.kind === "directory" ? (
+                  <Folder className="w-4 h-4 text-gray-500" />
+                ) : (
+                  <FileIcon className="w-4 h-4 text-gray-500" />
+                )}
                 <span className="text-sm text-gray-100 font-medium">{selectedFile.path}</span>
               </div>
+              {/* Correction 7: show the actual stored kind (file/directory) */}
               <div className="text-xs text-gray-500">
-                Kind: {getFileKind(selectedFile.path)}
+                Kind: {selectedFile.kind === "directory" ? "directory" : "file"}
+                {selectedFile.kind === "file" && (
+                  <span className="text-gray-600"> ({getFileKind(selectedFile.path)})</span>
+                )}
               </div>
               <div className="text-xs text-gray-600">
                 Last modified: {new Date(selectedFile.updatedAt).toLocaleString()}

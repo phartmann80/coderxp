@@ -3,7 +3,10 @@
 /**
  * Project launcher for CoderXP M2 Workspace Alpha.
  *
- * Commit 3 scope: premium, restrained launcher consistent with CoderXP.
+ * Commit 3 correction scope:
+ * - Project name input clears only after successful project creation
+ *   (correction 4: await success before closing UI state).
+ * - Selected template is preserved on failure.
  *
  * Visual style:
  * - Obsidian/graphite background
@@ -29,7 +32,7 @@ import type { WorkspaceProject, ProjectTemplateId } from "@/lib/workspace/types"
 interface ProjectLauncherProps {
   projects: WorkspaceProject[];
   creating: boolean;
-  onCreate: (name: string, templateId: ProjectTemplateId) => void;
+  onCreate: (name: string, templateId: ProjectTemplateId) => Promise<boolean>;
   onOpen: (projectId: string) => void;
 }
 
@@ -39,11 +42,17 @@ export function ProjectLauncher({ projects, creating, onCreate, onOpen }: Projec
 
   const canCreate = name.trim().length > 0 && !creating;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canCreate) return;
-    onCreate(name, selectedTemplate);
-    setName("");
+
+    // Correction 4: clear the name input only after successful creation.
+    // The onCreate callback now returns a promise that resolves to true/false.
+    const success = await onCreate(name, selectedTemplate);
+    if (success) {
+      setName("");
+    }
+    // On failure, the entered project name and selected template are preserved.
   };
 
   const formatDate = (timestamp: number) => {

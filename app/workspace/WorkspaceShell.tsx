@@ -3,7 +3,13 @@
 /**
  * Workspace shell for CoderXP M2 Workspace Alpha.
  *
- * Commit 3 scope: orchestrates the project lifecycle experience.
+ * Commit 3 correction scope: orchestrates the project lifecycle experience.
+ *
+ * Correction 2: ErrorBanner is not reserved only for view === "error".
+ * The shell supports:
+ * - launcher + visible operation error
+ * - project shell + visible operation error
+ * - fatal startup/database error view
  *
  * On mount, the hook checks persistence availability, loads the project
  * list, reads the active project preference, and opens the active project
@@ -29,11 +35,13 @@ export default function WorkspaceShell() {
     creating,
     renaming,
     deleting,
+    retryAction,
     handleCreateProject,
     handleRenameProject,
     handleDeleteProject,
     backToLauncher,
     retry,
+    dismissError,
     openProjectById,
   } = useWorkspaceState();
 
@@ -45,29 +53,44 @@ export default function WorkspaceShell() {
         </div>
       )}
 
+      {/* Fatal startup/database error: full-screen error view */}
       {view === "error" && error && (
-        <ErrorBanner error={error} onRetry={retry} />
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <ErrorBanner error={error} onRetry={retry} />
+        </div>
       )}
 
+      {/* Launcher + visible operation error (correction 2) */}
       {view === "launcher" && (
-        <ProjectLauncher
-          projects={projects}
-          creating={creating}
-          onCreate={handleCreateProject}
-          onOpen={openProjectById}
-        />
+        <div>
+          {error && (
+            <ErrorBanner error={error} onRetry={retry} onDismiss={dismissError} />
+          )}
+          <ProjectLauncher
+            projects={projects}
+            creating={creating}
+            onCreate={handleCreateProject}
+            onOpen={openProjectById}
+          />
+        </div>
       )}
 
+      {/* Project shell + visible operation error (correction 2) */}
       {view === "project" && activeProject && (
-        <ProjectShell
-          project={activeProject}
-          files={activeProjectFiles}
-          renaming={renaming}
-          deleting={deleting}
-          onBack={backToLauncher}
-          onRename={(newName) => handleRenameProject(activeProject.id, newName)}
-          onDelete={() => handleDeleteProject(activeProject.id)}
-        />
+        <div className="flex flex-col h-[calc(100vh-3.5rem)]">
+          {error && (
+            <ErrorBanner error={error} onRetry={retry} onDismiss={dismissError} />
+          )}
+          <ProjectShell
+            project={activeProject}
+            files={activeProjectFiles}
+            renaming={renaming}
+            deleting={deleting}
+            onBack={backToLauncher}
+            onRename={(newName) => handleRenameProject(activeProject.id, newName)}
+            onDelete={() => handleDeleteProject(activeProject.id)}
+          />
+        </div>
       )}
     </div>
   );

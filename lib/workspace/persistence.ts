@@ -599,25 +599,54 @@ export async function deleteProject(projectId: string): Promise<void> {
     "readwrite",
   );
 
-  // Delete the project record.
-  tx.objectStore(STORE_PROJECTS).delete(projectId);
-
-  // Delete all file records for this project via the byProject index.
+  const projectStore = tx.objectStore(STORE_PROJECTS);
   const fileStore = tx.objectStore(STORE_FILES);
+  const prefStore = tx.objectStore(STORE_PREFERENCES);
+
+  // --- PREFLIGHT: all reads before any writes ---
+
+  // 1. Read and verify the project exists.
+  const project = await wrapRequest(
+    projectStore.get(projectId) as IDBRequest<WorkspaceProject | undefined>,
+  );
+  if (!project) {
+    throw new PersistenceError("PROJECT_NOT_FOUND", `Project not found: ${projectId}`);
+  }
+
+  // 2. Read all associated file keys via the byProject index.
   const index = fileStore.index(FILES_INDEX_BY_PROJECT);
   const fileKeys = await wrapRequest(index.getAllKeys(projectId) as IDBRequest<IDBValidKey[]>);
 
-  for (const key of fileKeys) {
-    fileStore.delete(key);
-  }
-
-  // Delete activeProjectId preference if it references this project.
-  const prefStore = tx.objectStore(STORE_PREFERENCES);
+  // 3. Read the active-project preference.
   const pref = await wrapRequest(
     prefStore.get(PREF_ACTIVE_PROJECT_ID) as IDBRequest<WorkspacePreferenceRecord | undefined>,
   );
-  if (pref && pref.value === projectId) {
-    prefStore.delete(PREF_ACTIVE_PROJECT_ID);
+
+  // --- WRITE PHASE: all writes after all preflight reads succeed ---
+
+  try {
+    // Queue the project deletion.
+    projectStore.delete(projectId);
+
+    // Queue all file-record deletions.
+    for (const key of fileKeys) {
+      fileStore.delete(key);
+    }
+
+    // Queue the preference deletion if it references this project.
+    if (pref && pref.value === projectId) {
+      prefStore.delete(PREF_ACTIVE_PROJECT_ID);
+    }
+  } catch (syncError) {
+    // If a synchronous write error occurs, explicitly abort before rethrowing.
+    // No synchronous exception may allow a partially queued deletion
+    // transaction to commit.
+    try {
+      tx.abort();
+    } catch {
+      // Abort may throw if already aborted; ignore.
+    }
+    throw syncError;
   }
 
   await wrapTransaction(tx);

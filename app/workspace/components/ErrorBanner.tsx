@@ -6,9 +6,12 @@
  * Displays typed persistence errors with a retry action.
  * Does not expose stack traces, browser internals, file contents, or secrets.
  *
- * Correction 5: Uses controlled messages for all displayed codes and a
- * generic fallback — never error.message from an untrusted object.
- * Supports an optional onDismiss to clear the error without retrying.
+ * Final correction scope:
+ * - Uses controlled messages for all displayed codes and a generic fallback.
+ * - Accepts a retrying prop to disable Retry while a retry is in flight.
+ * - Accepts a retryAction presence check: do not render a functional-looking
+ *   Retry button when there is no action.
+ * - Dismiss is disabled while retrying.
  */
 
 import { AlertTriangle, RotateCcw, X } from "lucide-react";
@@ -29,17 +32,18 @@ const ERROR_MESSAGES: Record<string, string> = {
   TEMPLATE_UNAVAILABLE: "This template is not available for project creation.",
 };
 
-/** Generic fallback message — never use error.message from an untrusted object. */
+/** Generic fallback message: never use error.message from an untrusted object. */
 const GENERIC_FALLBACK_MESSAGE = "An unexpected local operation failed. Please try again.";
 
 interface ErrorBannerProps {
   error: WorkspaceError;
   onRetry: () => void;
+  retrying?: boolean;
   onDismiss?: () => void;
 }
 
-export function ErrorBanner({ error, onRetry, onDismiss }: ErrorBannerProps) {
-  // Always use controlled messages — never error.message from an untrusted object.
+export function ErrorBanner({ error, onRetry, retrying, onDismiss }: ErrorBannerProps) {
+  // Always use controlled messages: never error.message from an untrusted object.
   const message = ERROR_MESSAGES[error.code] ?? GENERIC_FALLBACK_MESSAGE;
 
   return (
@@ -52,15 +56,17 @@ export function ErrorBanner({ error, onRetry, onDismiss }: ErrorBannerProps) {
       <div className="flex items-center gap-3">
         <button
           onClick={onRetry}
-          className="flex items-center gap-2 px-4 py-2 text-sm text-cyan-400 border border-cyan-800 rounded-md hover:bg-cyan-950/40 transition-colors"
+          disabled={retrying}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-cyan-400 border border-cyan-800 rounded-md hover:bg-cyan-950/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <RotateCcw className="w-4 h-4" />
-          Retry
+          {retrying ? "Retrying..." : "Retry"}
         </button>
         {onDismiss && (
           <button
             onClick={onDismiss}
-            className="flex items-center gap-2 px-4 py-2 text-sm text-gray-400 border border-gray-700 rounded-md hover:bg-gray-800/50 transition-colors"
+            disabled={retrying}
+            className="flex items-center gap-2 px-4 py-2 text-sm text-gray-400 border border-gray-700 rounded-md hover:bg-gray-800/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <X className="w-4 h-4" />
             Dismiss

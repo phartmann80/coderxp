@@ -3,13 +3,13 @@
 /**
  * Workspace shell for CoderXP M2 Workspace Alpha.
  *
- * Commit 3 correction scope: orchestrates the project lifecycle experience.
+ * Final correction scope: orchestrates the project lifecycle experience.
  *
- * Correction 2: ErrorBanner is not reserved only for view === "error".
- * The shell supports:
- * - launcher + visible operation error
- * - project shell + visible operation error
- * - fatal startup/database error view
+ * - ErrorBanner is not reserved only for view === "error".
+ * - Shows Retry only when a retry action exists.
+ * - Passes retrying to ErrorBanner.
+ * - Passes openingProjectId to ProjectLauncher.
+ * - Passes projectOperationPending to ProjectShell.
  *
  * On mount, the hook checks persistence availability, loads the project
  * list, reads the active project preference, and opens the active project
@@ -35,6 +35,8 @@ export default function WorkspaceShell() {
     creating,
     renaming,
     deleting,
+    retrying,
+    openingProjectId,
     retryAction,
     handleCreateProject,
     handleRenameProject,
@@ -44,6 +46,11 @@ export default function WorkspaceShell() {
     dismissError,
     openProjectById,
   } = useWorkspaceState();
+
+  // Unified cross-operation lock: rename, delete, retry, and opening
+  // must never overlap with each other.
+  const projectOperationPending =
+    renaming || deleting || retrying || openingProjectId !== null;
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] bg-[#0d0e10] text-gray-200">
@@ -56,36 +63,53 @@ export default function WorkspaceShell() {
       {/* Fatal startup/database error: full-screen error view */}
       {view === "error" && error && (
         <div className="flex items-center justify-center min-h-[60vh]">
-          <ErrorBanner error={error} onRetry={retry} />
+          <ErrorBanner
+            error={error}
+            onRetry={retry}
+            retrying={retrying}
+            onDismiss={dismissError}
+          />
         </div>
       )}
 
-      {/* Launcher + visible operation error (correction 2) */}
+      {/* Launcher + visible operation error */}
       {view === "launcher" && (
         <div>
-          {error && (
-            <ErrorBanner error={error} onRetry={retry} onDismiss={dismissError} />
+          {error && retryAction && (
+            <ErrorBanner
+              error={error}
+              onRetry={retry}
+              retrying={retrying}
+              onDismiss={dismissError}
+            />
           )}
           <ProjectLauncher
             projects={projects}
             creating={creating}
+            openingProjectId={openingProjectId}
             onCreate={handleCreateProject}
             onOpen={openProjectById}
           />
         </div>
       )}
 
-      {/* Project shell + visible operation error (correction 2) */}
+      {/* Project shell + visible operation error */}
       {view === "project" && activeProject && (
         <div className="flex flex-col h-[calc(100vh-3.5rem)]">
-          {error && (
-            <ErrorBanner error={error} onRetry={retry} onDismiss={dismissError} />
+          {error && retryAction && (
+            <ErrorBanner
+              error={error}
+              onRetry={retry}
+              retrying={retrying}
+              onDismiss={dismissError}
+            />
           )}
           <ProjectShell
             project={activeProject}
             files={activeProjectFiles}
             renaming={renaming}
             deleting={deleting}
+            projectOperationPending={projectOperationPending}
             onBack={backToLauncher}
             onRename={(newName) => handleRenameProject(activeProject.id, newName)}
             onDelete={() => handleDeleteProject(activeProject.id)}

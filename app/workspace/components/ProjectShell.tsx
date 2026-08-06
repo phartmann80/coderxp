@@ -3,12 +3,16 @@
 /**
  * Open-project shell for CoderXP M2 Workspace Alpha.
  *
- * Commit 3 correction scope:
- * - Rename mode closes only after successful rename (correction 4).
+ * Final correction scope:
+ * - Rename mode closes only after successful rename.
  * - Rename text remains available after failure.
  * - Delete confirmation closes only after successful deletion.
- * - Selected-file summary shows the actual stored kind (file/directory)
- *   (correction 7).
+ * - Selected-file summary shows the actual stored kind (file/directory).
+ * - Accepts projectOperationPending to disable Back, Rename, Delete, Cancel
+ *   while any cross-operation is pending (rename, delete, retry, opening).
+ * - Rename input and Cancel are disabled while the rename transaction is pending.
+ * - Delete-confirmation Cancel is disabled while deletion is pending.
+ * - Opening another project is disabled while any operation is pending.
  *
  * Does NOT include:
  * - CodeMirror or editable file contents
@@ -34,6 +38,7 @@ interface ProjectShellProps {
   files: WorkspaceFileRecord[];
   renaming: boolean;
   deleting: boolean;
+  projectOperationPending: boolean;
   onBack: () => void;
   onRename: (newName: string) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
@@ -44,6 +49,7 @@ export function ProjectShell({
   files,
   renaming,
   deleting,
+  projectOperationPending,
   onBack,
   onRename,
   onDelete,
@@ -64,8 +70,7 @@ export function ProjectShell({
     e.preventDefault();
     if (renameValue.trim().length === 0 || renaming) return;
 
-    // Correction 4: close rename mode only after successful rename.
-    // The onRename callback returns a promise that resolves to true/false.
+    // Close rename mode only after successful rename.
     const success = await onRename(renameValue);
     if (success) {
       setRenameMode(false);
@@ -74,8 +79,7 @@ export function ProjectShell({
   };
 
   const handleDeleteConfirm = async () => {
-    // Correction 4: close delete confirmation only after successful deletion.
-    // The onDelete callback returns a promise that resolves to true/false.
+    // Close delete confirmation only after successful deletion.
     const success = await onDelete();
     if (success) {
       setConfirmDelete(false);
@@ -102,7 +106,8 @@ export function ProjectShell({
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+            disabled={projectOperationPending}
+            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ArrowLeft className="w-4 h-4" />
             Projects
@@ -116,7 +121,8 @@ export function ProjectShell({
                 onChange={(e) => setRenameValue(e.target.value)}
                 maxLength={100}
                 autoFocus
-                className="px-2 py-0.5 text-sm text-gray-100 bg-gray-800 border border-gray-600 rounded focus:outline-none focus:border-cyan-600"
+                disabled={renaming}
+                className="px-2 py-0.5 text-sm text-gray-100 bg-gray-800 border border-gray-600 rounded focus:outline-none focus:border-cyan-600 disabled:opacity-50"
               />
               <button
                 type="submit"
@@ -131,7 +137,8 @@ export function ProjectShell({
                   setRenameMode(false);
                   setRenameValue(project.name);
                 }}
-                className="text-xs text-gray-500 hover:text-gray-400"
+                disabled={renaming}
+                className="text-xs text-gray-500 hover:text-gray-400 disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -155,8 +162,8 @@ export function ProjectShell({
                 setRenameMode(true);
                 setRenameValue(project.name);
               }}
-              disabled={renaming}
-              className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50"
+              disabled={renaming || projectOperationPending}
+              className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Pencil className="w-3.5 h-3.5" />
               Rename
@@ -164,8 +171,8 @@ export function ProjectShell({
           )}
           <button
             onClick={() => setConfirmDelete(true)}
-            disabled={deleting}
-            className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+            disabled={deleting || projectOperationPending}
+            className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Trash2 className="w-3.5 h-3.5" />
             Delete
@@ -203,7 +210,7 @@ export function ProjectShell({
                 )}
                 <span className="text-sm text-gray-100 font-medium">{selectedFile.path}</span>
               </div>
-              {/* Correction 7: show the actual stored kind (file/directory) */}
+              {/* Show the actual stored kind (file/directory) */}
               <div className="text-xs text-gray-500">
                 Kind: {selectedFile.kind === "directory" ? "directory" : "file"}
                 {selectedFile.kind === "file" && (
@@ -240,7 +247,8 @@ export function ProjectShell({
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setConfirmDelete(false)}
-                className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+                disabled={deleting}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <X className="w-3.5 h-3.5" />
                 Cancel
@@ -248,7 +256,7 @@ export function ProjectShell({
               <button
                 onClick={handleDeleteConfirm}
                 disabled={deleting}
-                className="px-3 py-1.5 text-sm text-white bg-red-700 rounded-md hover:bg-red-600 transition-colors disabled:opacity-50"
+                className="px-3 py-1.5 text-sm text-white bg-red-700 rounded-md hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {deleting ? "Deleting..." : "Delete"}
               </button>

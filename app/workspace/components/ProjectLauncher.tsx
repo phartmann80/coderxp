@@ -3,10 +3,12 @@
 /**
  * Project launcher for CoderXP M2 Workspace Alpha.
  *
- * Commit 3 correction scope:
- * - Project name input clears only after successful project creation
- *   (correction 4: await success before closing UI state).
+ * Final correction scope:
+ * - Project name input clears only after successful project creation.
  * - Selected template is preserved on failure.
+ * - Opening is disabled while another project is opening (openingProjectId).
+ * - Creation is disabled while opening.
+ * - Shows "Opening..." on the actual project being opened.
  *
  * Visual style:
  * - Obsidian/graphite background
@@ -32,22 +34,23 @@ import type { WorkspaceProject, ProjectTemplateId } from "@/lib/workspace/types"
 interface ProjectLauncherProps {
   projects: WorkspaceProject[];
   creating: boolean;
+  openingProjectId: string | null;
   onCreate: (name: string, templateId: ProjectTemplateId) => Promise<boolean>;
   onOpen: (projectId: string) => void;
 }
 
-export function ProjectLauncher({ projects, creating, onCreate, onOpen }: ProjectLauncherProps) {
+export function ProjectLauncher({ projects, creating, openingProjectId, onCreate, onOpen }: ProjectLauncherProps) {
   const [name, setName] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplateId>("static-html");
 
-  const canCreate = name.trim().length > 0 && !creating;
+  // Creation is disabled while creating or while a project is opening.
+  const canCreate = name.trim().length > 0 && !creating && openingProjectId === null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canCreate) return;
 
-    // Correction 4: clear the name input only after successful creation.
-    // The onCreate callback now returns a promise that resolves to true/false.
+    // Clear the name input only after successful creation.
     const success = await onCreate(name, selectedTemplate);
     if (success) {
       setName("");
@@ -86,7 +89,7 @@ export function ProjectLauncher({ projects, creating, onCreate, onOpen }: Projec
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={100}
-              disabled={creating}
+              disabled={creating || openingProjectId !== null}
               placeholder="My static site"
               className="w-full max-w-md px-3 py-2 text-sm text-gray-100 bg-gray-900 border border-gray-700 rounded-md focus:outline-none focus:border-cyan-600 transition-colors disabled:opacity-50"
             />
@@ -102,7 +105,7 @@ export function ProjectLauncher({ projects, creating, onCreate, onOpen }: Projec
                   <button
                     key={template.id}
                     type="button"
-                    disabled={!isAvailable || creating}
+                    disabled={!isAvailable || creating || openingProjectId !== null}
                     onClick={() => isAvailable && setSelectedTemplate(template.id)}
                     className={`relative p-4 text-left rounded-lg border transition-all ${
                       isSelected && isAvailable
@@ -156,27 +159,44 @@ export function ProjectLauncher({ projects, creating, onCreate, onOpen }: Projec
           <p className="text-sm text-gray-500 italic">No projects yet. Create one above to get started.</p>
         ) : (
           <div className="space-y-2">
-            {projects.map((project) => (
-              <button
-                key={project.id}
-                onClick={() => onOpen(project.id)}
-                className="flex items-center justify-between w-full p-3 text-left rounded-lg border border-gray-800 bg-gray-900 hover:border-gray-700 hover:bg-gray-800/50 transition-all"
-              >
-                <div className="flex items-center gap-3">
-                  <FileCode2 className="w-4 h-4 text-gray-500" />
-                  <div>
-                    <div className="text-sm text-gray-100 font-medium">{project.name}</div>
-                    <div className="text-xs text-gray-500">
-                      {project.templateId === "static-html" ? "Static HTML" : project.templateId}
+            {projects.map((project) => {
+              const isOpening = openingProjectId === project.id;
+              const isDisabled = openingProjectId !== null || creating;
+              return (
+                <button
+                  key={project.id}
+                  onClick={() => onOpen(project.id)}
+                  disabled={isDisabled}
+                  className={`flex items-center justify-between w-full px-4 py-3 text-left rounded-lg border transition-all ${
+                    isOpening
+                      ? "border-cyan-600 bg-cyan-950/20"
+                      : isDisabled
+                        ? "border-gray-800 bg-gray-900/50 cursor-not-allowed opacity-60"
+                        : "border-gray-700 bg-gray-900 hover:border-gray-600"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <FileCode2 className="w-4 h-4 text-gray-500" />
+                    <div>
+                      <div className="text-sm text-gray-100 font-medium">{project.name}</div>
+                      <div className="text-xs text-gray-500">
+                        {project.templateId === "static-html" ? "Static HTML" : project.templateId}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                  <Clock className="w-3 h-3" />
-                  {formatDate(project.updatedAt)}
-                </div>
-              </button>
-            ))}
+                  <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                    {isOpening ? (
+                      <span className="text-cyan-400">Opening...</span>
+                    ) : (
+                      <>
+                        <Clock className="w-3 h-3" />
+                        {formatDate(project.updatedAt)}
+                      </>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

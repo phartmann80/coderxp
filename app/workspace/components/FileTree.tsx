@@ -3,8 +3,16 @@
 /**
  * Read-only file tree for CoderXP M2 Workspace Alpha.
  *
- * Commit 3 scope: read-only hierarchical display of stored file paths.
+ * Final correction scope: read-only hierarchical display of stored file paths.
  * No create, rename, delete, drag-and-drop, or editing.
+ *
+ * Directory interaction separates expansion from selection:
+ * - Chevron control toggles expansion.
+ * - Persisted directory name/row selects that directory.
+ * - onSelect(node.path) is called for persisted directories.
+ * - Implicit directories may expand but must not masquerade as stored records.
+ * - Selected persisted directories display: Kind: directory.
+ * - Keyboard-accessible buttons and visible selected styling.
  *
  * The tree is generated from persisted entries via buildFileTree().
  * Directories before files, stable alphabetical ordering.
@@ -50,19 +58,44 @@ function FileTreeNodeView({ node, depth, selectedPath, onSelect }: FileTreeNodeV
   if (node.kind === "directory") {
     return (
       <div>
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1.5 w-full px-2 py-1 text-left text-sm text-gray-300 hover:bg-gray-800/50 rounded transition-colors"
+        <div
+          className="flex items-center w-full text-left text-sm rounded transition-colors"
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
         >
-          {expanded ? (
-            <ChevronDown className="w-3.5 h-3.5 flex-shrink-0 text-gray-500" />
-          ) : (
-            <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 text-gray-500" />
-          )}
-          <Folder className="w-3.5 h-3.5 flex-shrink-0 text-gray-500" />
-          <span className="truncate">{node.name}</span>
-        </button>
+          {/* Chevron control: toggles expansion only */}
+          <button
+            onClick={() => setExpanded(!expanded)}
+            aria-label={expanded ? "Collapse" : "Expand"}
+            className="flex items-center p-1 text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            {expanded ? (
+              <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" />
+            )}
+          </button>
+          {/* Directory name/row: selects if persisted, expands if implicit */}
+          <button
+            onClick={() => {
+              if (node.isPersisted) {
+                onSelect(node.path);
+              } else {
+                setExpanded(!expanded);
+              }
+            }}
+            disabled={!node.isPersisted}
+            className={`flex items-center gap-1.5 flex-1 py-1 pr-2 text-left rounded transition-colors ${
+              isSelected && node.isPersisted
+                ? "bg-cyan-950/40 text-cyan-300"
+                : node.isPersisted
+                  ? "text-gray-300 hover:bg-gray-800/50"
+                  : "text-gray-300 cursor-default"
+            }`}
+          >
+            <Folder className="w-3.5 h-3.5 flex-shrink-0 text-gray-500" />
+            <span className="truncate">{node.name}</span>
+          </button>
+        </div>
         {expanded && node.children.length > 0 && (
           <div>
             {node.children.map((child) => (

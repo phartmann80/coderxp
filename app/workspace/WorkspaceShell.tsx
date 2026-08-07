@@ -3,21 +3,11 @@
 /**
  * Workspace shell for CoderXP M2 Workspace Alpha.
  *
- * Final correction scope: orchestrates the project lifecycle experience.
- *
- * - ErrorBanner is not reserved only for view === "error".
- * - Shows Retry only when a retry action exists.
- * - Passes retrying to ErrorBanner.
- * - Passes openingProjectId to ProjectLauncher.
- * - Passes projectOperationPending to ProjectShell.
- *
- * On mount, the hook checks persistence availability, loads the project
- * list, reads the active project preference, and opens the active project
- * or shows the launcher. All states are truthful: loading, launcher,
- * open project, or typed error.
- *
- * Visual style: obsidian/graphite background, warm-white text, subtle
- * cyan accents, Lucide icons. No emoji, no purple/magenta, no fake terminal.
+ * Correction (fix(workspace): preserve retry and open ownership):
+ * - Passes retrying to ProjectLauncher so all launcher controls are
+ *   disabled while a retry is settling.
+ * - Fatal error view (view === "error") shows Retry only, no Dismiss.
+ * - Launcher and project views show ErrorBanner with retrying state.
  */
 
 import { useWorkspaceState } from "./hooks/useWorkspaceState";
@@ -49,8 +39,6 @@ export default function WorkspaceShell() {
     openProjectById,
   } = useWorkspaceState();
 
-  // Unified cross-operation lock: rename, delete, retry, and opening
-  // must never overlap with each other.
   const projectOperationPending =
     renaming || deleting || retrying || openingProjectId !== null;
 
@@ -62,9 +50,6 @@ export default function WorkspaceShell() {
         </div>
       )}
 
-      {/* Fatal startup/database error: full-screen error view.
-          Retry only, no Dismiss. Fatal errors must never create
-          view = error + error = null. */}
       {view === "error" && error && (
         <div className="flex items-center justify-center min-h-[60vh]">
           <ErrorBanner
@@ -75,7 +60,6 @@ export default function WorkspaceShell() {
         </div>
       )}
 
-      {/* Launcher + visible operation error */}
       {view === "launcher" && (
         <div>
           {error && retryAction && (
@@ -90,6 +74,7 @@ export default function WorkspaceShell() {
             projects={projects}
             creating={creating}
             openingProjectId={openingProjectId}
+            retrying={retrying}
             creationSuccessVersion={creationSuccessVersion}
             onCreate={handleCreateProject}
             onOpen={openProjectById}
@@ -97,7 +82,6 @@ export default function WorkspaceShell() {
         </div>
       )}
 
-      {/* Project shell + visible operation error */}
       {view === "project" && activeProject && (
         <div className="flex flex-col h-[calc(100vh-3.5rem)]">
           {error && retryAction && (

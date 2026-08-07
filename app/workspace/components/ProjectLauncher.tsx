@@ -35,12 +35,13 @@ interface ProjectLauncherProps {
   projects: WorkspaceProject[];
   creating: boolean;
   openingProjectId: string | null;
+  retrying: boolean;
   creationSuccessVersion: number;
   onCreate: (name: string, templateId: ProjectTemplateId) => Promise<boolean>;
   onOpen: (projectId: string) => void;
 }
 
-export function ProjectLauncher({ projects, creating, openingProjectId, creationSuccessVersion, onCreate, onOpen }: ProjectLauncherProps) {
+export function ProjectLauncher({ projects, creating, openingProjectId, retrying, creationSuccessVersion, onCreate, onOpen }: ProjectLauncherProps) {
   const [name, setName] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplateId>("static-html");
 
@@ -56,7 +57,7 @@ export function ProjectLauncher({ projects, creating, openingProjectId, creation
   }
 
   // Creation is disabled while creating or while a project is opening.
-  const canCreate = name.trim().length > 0 && !creating && openingProjectId === null;
+  const canCreate = name.trim().length > 0 && !creating && openingProjectId === null && !retrying;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,7 +100,7 @@ export function ProjectLauncher({ projects, creating, openingProjectId, creation
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={100}
-              disabled={creating || openingProjectId !== null}
+              disabled={creating || openingProjectId !== null || retrying}
               placeholder="My static site"
               className="w-full max-w-md px-3 py-2 text-sm text-gray-100 bg-gray-900 border border-gray-700 rounded-md focus:outline-none focus:border-cyan-600 transition-colors disabled:opacity-50"
             />
@@ -115,7 +116,7 @@ export function ProjectLauncher({ projects, creating, openingProjectId, creation
                   <button
                     key={template.id}
                     type="button"
-                    disabled={!isAvailable || creating || openingProjectId !== null}
+                    disabled={!isAvailable || creating || openingProjectId !== null || retrying}
                     onClick={() => isAvailable && setSelectedTemplate(template.id)}
                     className={`relative p-4 text-left rounded-lg border transition-all ${
                       isSelected && isAvailable
@@ -171,7 +172,7 @@ export function ProjectLauncher({ projects, creating, openingProjectId, creation
           <div className="space-y-2">
             {projects.map((project) => {
               const isOpening = openingProjectId === project.id;
-              const isDisabled = openingProjectId !== null || creating;
+              const isDisabled = openingProjectId !== null || creating || retrying;
               return (
                 <button
                   key={project.id}

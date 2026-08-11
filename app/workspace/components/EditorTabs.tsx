@@ -60,7 +60,7 @@ export function EditorTabs({
               <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 flex-shrink-0" />
             )}
             <button
-              className="flex-shrink-0 p-0.5 rounded hover:bg-gray-700/50 transition-colors opacity-0 group-hover:opacity-100"
+              className={`flex-shrink-0 p-0.5 rounded hover:bg-gray-700/50 transition-colors ${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onClose(path);

@@ -850,10 +850,19 @@ export function useWorkspaceState() {
    * Updates both the active project state and the projects list.
    * Does NOT claim a workspace operation: this is a lightweight metadata
    * update, not a project lifecycle operation.
+   *
+   * Monotonic update: an older project revision arriving after a newer
+   * revision is already in state is ignored, preventing stale overwrites.
    */
   const handleProjectUpdate = useCallback(
     (updated: WorkspaceProject) => {
-      setActiveProject(updated);
+      setActiveProject((prev) => {
+        if (prev && prev.id === updated.id && prev.revision > updated.revision) {
+          // Stale revision: ignore the older update.
+          return prev;
+        }
+        return updated;
+      });
       replaceProjectInState(updated);
     },
     [replaceProjectInState],

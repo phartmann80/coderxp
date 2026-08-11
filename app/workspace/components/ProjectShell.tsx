@@ -19,7 +19,7 @@
  * - Terminal, preview panel, run button, fake build status, or fake output
  */
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useRef } from "react";
 import {
   ArrowLeft,
   HardDrive,
@@ -31,6 +31,7 @@ import type { WorkspaceProject, WorkspaceFileRecord } from "@/lib/workspace/type
 import { buildFileTree } from "@/lib/workspace/project-tree";
 import { FileTree } from "./FileTree";
 import { EditorPanel } from "./EditorPanel";
+import type { FileOpenRequest } from "@/app/workspace/hooks/useEditorPersistence";
 
 interface ProjectShellProps {
   project: WorkspaceProject;
@@ -58,7 +59,8 @@ export function ProjectShell({
   onProjectUpdate,
 }: ProjectShellProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(project.activeFile);
-  const [fileToOpen, setFileToOpen] = useState<string | null>(null);
+  const [fileOpenRequest, setFileOpenRequest] = useState<FileOpenRequest | null>(null);
+  const fileOpenCounterRef = useRef(0);
   const [renameMode, setRenameMode] = useState(false);
   const [renameValue, setRenameValue] = useState(project.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -102,7 +104,8 @@ export function ProjectShell({
     // Only open files (not directories) in the editor.
     const record = files.find((f) => f.path === path);
     if (record && record.kind === "file") {
-      setFileToOpen(path);
+      fileOpenCounterRef.current++;
+      setFileOpenRequest({ path, requestId: fileOpenCounterRef.current });
     }
   }, [files]);
 
@@ -211,8 +214,9 @@ export function ProjectShell({
             key={project.id}
             project={project}
             files={files}
-            fileToOpen={fileToOpen}
+            fileOpenRequest={fileOpenRequest}
             onProjectUpdate={onProjectUpdate}
+            onBack={onBack}
           />
         </div>
       </div>

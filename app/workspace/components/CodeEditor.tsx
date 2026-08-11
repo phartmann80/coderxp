@@ -3,18 +3,21 @@
 /**
  * CodeMirror editor for CoderXP M2 Workspace Alpha.
  *
- * Commit 4 scope: file-content editing with CodeMirror 6 via @uiw/react-codemirror.
+ * Correction (fix(workspace): make editor persistence lossless):
+ * - Removed component-local debounce saving. Save scheduling is now owned
+ *   by the useEditorPersistence hook / EditorPanel.
+ * - CodeEditor is a pure presentational component: it renders the editor
+ *   and calls onChange on every content change. Persistence is handled
+ *   by the parent.
  * - Dark theme matching the workspace obsidian/graphite palette.
  * - Language extensions resolved from file path.
- * - Debounced save via onChange callback (SAVE_DEBOUNCE_MS).
  * - Read-only mode for directories and unsupported entries.
  */
 
-import { useMemo, useRef, useEffect, useCallback } from "react";
+import { useMemo } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { EditorView } from "@codemirror/view";
 import { getLanguageExtension, getLanguageLabel } from "@/lib/workspace/lang";
-import { SAVE_DEBOUNCE_MS } from "@/lib/workspace/constants";
 
 interface CodeEditorProps {
   /** Path of the file being edited. */
@@ -23,10 +26,8 @@ interface CodeEditorProps {
   value: string;
   /** Whether the editor is read-only. */
   readOnly?: boolean;
-  /** Immediate callback on every content change (before debounce). */
+  /** Immediate callback on every content change. */
   onChange?: (value: string) => void;
-  /** Debounced save callback. Called SAVE_DEBOUNCE_MS after the last edit. */
-  onSave?: (path: string, contents: string) => void;
 }
 
 /** Custom dark theme extension matching the workspace palette. */
@@ -73,46 +74,9 @@ const darkTheme = EditorView.theme(
   { dark: true },
 );
 
-export function CodeEditor({ filePath, value, readOnly = false, onChange, onSave }: CodeEditorProps) {
+export function CodeEditor({ filePath, value, readOnly = false, onChange }: CodeEditorProps) {
   const extensions = useMemo(() => getLanguageExtension(filePath), [filePath]);
   const languageLabel = useMemo(() => getLanguageLabel(filePath), [filePath]);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latestContent = useRef(value);
-
-  // Keep latestContent in sync so the debounce callback always saves the
-  // most recent content, not a stale closure value.
-  useEffect(() => {
-    latestContent.current = value;
-  }, [value]);
-
-  // Cleanup pending debounce on unmount or file switch.
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-        debounceRef.current = null;
-      }
-    };
-  }, [filePath]);
-
-  const handleChange = useCallback(
-    (val: string) => {
-      latestContent.current = val;
-      if (onChange) onChange(val);
-
-      if (!onSave || readOnly) return;
-
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-
-      debounceRef.current = setTimeout(() => {
-        onSave(filePath, latestContent.current);
-        debounceRef.current = null;
-      }, SAVE_DEBOUNCE_MS);
-    },
-    [filePath, onSave, onChange, readOnly],
-  );
 
   return (
     <div className="flex flex-col h-full">
@@ -127,7 +91,7 @@ export function CodeEditor({ filePath, value, readOnly = false, onChange, onSave
           theme={darkTheme}
           extensions={extensions}
           readOnly={readOnly}
-          onChange={handleChange}
+          onChange={onChange}
           basicSetup={{
             lineNumbers: true,
             foldGutter: true,

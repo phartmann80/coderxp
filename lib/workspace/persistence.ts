@@ -174,191 +174,186 @@ export function openWorkspaceDatabase(): Promise<IDBDatabase> {
     resolveSettle = r;
   });
 
+  let resolveDb!: (db: IDBDatabase) => void;
+  let rejectDb!: (error: PersistenceError) => void;
+  const promise = new Promise<IDBDatabase>((res, rej) => {
+    resolveDb = res;
+    rejectDb = rej;
+  });
+
   const pending: PendingDatabaseOpen = {
-    promise: undefined as unknown as Promise<IDBDatabase>,
+    promise,
     cancelled: false,
     settled: false,
     rejected: false,
-    reject: undefined as unknown as (error: PersistenceError) => void,
+    reject: rejectDb,
     settlePromise,
     resolveSettle,
   };
 
   pendingOpen = pending;
 
-  pending.promise = new Promise<IDBDatabase>((resolve, reject) => {
-    pending.reject = reject;
-
-    let request: IDBOpenDBRequest;
-    try {
-      request = indexedDB.open(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION);
-    } catch (err) {
-      // Synchronous failure: clear pending and reject.
+  let request: IDBOpenDBRequest;
+  try {
+    request = indexedDB.open(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION);
+  } catch (error) {
+    pending.settled = true;
+    pending.resolveSettle();
+    if (isCurrentOwner(pending)) {
       pendingOpen = null;
-      reject(
-        new PersistenceError(
-          "DATABASE_OPEN_FAILED",
-          "Failed to open the workspace database.",
-          err,
-        ),
-      );
-      return;
+    }
+    pending.reject(
+      new PersistenceError("DATABASE_OPEN_FAILED", "Failed to open database.", error),
+    );
+    return promise;
+  }
+
+  request.onupgradeneeded = (_event: IDBVersionChangeEvent) => {
+    const db = request.result;
+    const tx = request.transaction;
+
+    // Create stores only when absent.
+    if (!db.objectStoreNames.contains(STORE_PROJECTS)) {
+      db.createObjectStore(STORE_PROJECTS, { keyPath: "id" });
     }
 
-    request.onupgradeneeded = (_event: IDBVersionChangeEvent) => {
-      const db = request.result;
-
-      if (!db.objectStoreNames.contains(STORE_PROJECTS)) {
-        db.createObjectStore(STORE_PROJECTS, { keyPath: "id" });
-      }
-
-      if (!db.objectStoreNames.contains(STORE_FILES)) {
-        const fileStore = db.createObjectStore(STORE_FILES, {
-          keyPath: FILES_KEY_PATH,
-        });
+    if (!db.objectStoreNames.contains(STORE_FILES)) {
+      const fileStore = db.createObjectStore(STORE_FILES, {
+        keyPath: FILES_KEY_PATH,
+      });
+      if (!fileStore.indexNames.contains(FILES_INDEX_BY_PROJECT)) {
         fileStore.createIndex(FILES_INDEX_BY_PROJECT, "projectId", {
           unique: false,
         });
       }
-
-      if (!db.objectStoreNames.contains(STORE_PREFERENCES)) {
-        db.createObjectStore(STORE_PREFERENCES, { keyPath: "key" });
+    } else if (tx) {
+      // Obtain the existing files store from the upgrade transaction.
+      const fileStore = tx.objectStore(STORE_FILES);
+      if (!fileStore.indexNames.contains(FILES_INDEX_BY_PROJECT)) {
+        fileStore.createIndex(FILES_INDEX_BY_PROJECT, "projectId", {
+          unique: false,
+        });
       }
-    };
+    }
 
-    request.onsuccess = (_event: Event) => {
-      const db = request.result;
-      pending.settled = true;
-      pending.resolveSettle();
+    if (!db.objectStoreNames.contains(STORE_PREFERENCES)) {
+      db.createObjectStore(STORE_PREFERENCES, { keyPath: "key" });
+    }
+  };
 
-      // Verify ownership: only the current pending record may modify global state.
-      if (!isCurrentOwner(pending)) {
-        db.close();
-        return;
-      }
+  request.onsuccess = (_event: Event) => {
+    const db = request.result;
+    pending.settled = true;
+    pending.resolveSettle();
 
-      // If cancelled or already rejected (via onblocked), close without caching.
-      if (shouldDiscardOpen(pending)) {
-        db.close();
-        pendingOpen = null;
-        return;
-      }
+    // Verify ownership: only the current pending record may modify global state.
+    if (!isCurrentOwner(pending)) {
+      db.close();
+      return;
+    }
 
-      // Cache the connection and resolve.
-      dbConnection = db;
+    // If cancelled or already rejected (via onblocked), close without caching.
+    if (shouldDiscardOpen(pending)) {
+      db.close();
       pendingOpen = null;
-      resolve(db);
-    };
+      return;
+    }
 
-    request.onblocked = (_event: Event) => {
-      // Reject the exposed promise but do not settle the request.
-      // The later onsuccess will close the database without caching.
-      if (isCurrentOwner(pending) && !pending.rejected) {
-        pending.rejected = true;
-        pending.reject(
-          new PersistenceError(
-            "DATABASE_OPEN_FAILED",
-            "The workspace database is blocked by another tab or version change.",
-          ),
-        );
+    // Close and clear the cached connection when another tab upgrades.
+    db.onversionchange = (_e: IDBVersionChangeEvent) => {
+      db.close();
+      if (dbConnection === db) {
+        dbConnection = null;
       }
     };
 
-    request.onerror = (_event: Event) => {
-      pending.settled = true;
-      pending.resolveSettle();
+    dbConnection = db;
+    pendingOpen = null;
+    resolveDb(db);
+  };
 
-      if (isCurrentOwner(pending)) {
-        pendingOpen = null;
-      }
+  request.onerror = (_event: Event) => {
+    pending.settled = true;
+    pending.resolveSettle();
 
-      reject(
-        new PersistenceError(
-          "DATABASE_OPEN_FAILED",
-          "Failed to open the workspace database.",
-          request.error,
-        ),
+    // Verify ownership.
+    if (!isCurrentOwner(pending)) {
+      return;
+    }
+
+    pendingOpen = null;
+    if (!pending.rejected) {
+      pending.rejected = true;
+      pending.reject(
+        new PersistenceError("DATABASE_OPEN_FAILED", "Database open request failed.", request.error),
       );
-    };
-  });
+    }
+  };
 
-  // Ensure the settle promise resolves regardless of outcome.
-  pending.promise.then(
-    () => {
-      if (!pending.settled) {
-        pending.settled = true;
-        pending.resolveSettle();
-      }
-    },
-    () => {
-      if (!pending.settled) {
-        pending.settled = true;
-        pending.resolveSettle();
-      }
-    },
-  );
-
-  return pending.promise;
-}
-
-/**
- * Closes the cached database connection and clears the pending open record.
- * Called during shutdown or when the connection is stale.
- */
-export function closeWorkspaceDatabase(): void {
-  if (pendingOpen && !pendingOpen.settled) {
-    pendingOpen.cancelled = true;
-    if (!pendingOpen.rejected) {
-      pendingOpen.rejected = true;
-      pendingOpen.reject(
+  request.onblocked = (_event: IDBVersionChangeEvent) => {
+    // Reject the exposed operation, but the underlying request remains owned
+    // until its eventual success/error. Its later success must be closed.
+    if (isCurrentOwner(pending) && !pending.rejected) {
+      pending.rejected = true;
+      pending.reject(
         new PersistenceError(
           "DATABASE_OPEN_FAILED",
-          "The workspace database open was cancelled.",
+          "Database open blocked by another tab or connection.",
         ),
       );
     }
-  }
+    // Do NOT mark settled or clear pendingOpen: the request is still in flight.
+  };
 
+  return promise;
+}
+
+/**
+ * Closes the cached database connection and invalidates any pending open.
+ *
+ * If a pending open exists, marks it cancelled and rejects the exposed
+ * promise. The underlying IDB request remains in flight until it settles;
+ * its later onsuccess closes the database without caching or resolving.
+ *
+ * A new open called after this will wait for the old request to settle
+ * before starting, preventing parallel opens.
+ */
+export function closeWorkspaceDatabase(): void {
   if (dbConnection) {
     dbConnection.close();
     dbConnection = null;
   }
 
-  pendingOpen = null;
+  if (pendingOpen) {
+    pendingOpen.cancelled = true;
+    if (!pendingOpen.rejected) {
+      pendingOpen.rejected = true;
+      pendingOpen.reject(
+        new PersistenceError("DATABASE_OPEN_FAILED", "Database open cancelled."),
+      );
+    }
+    // Do NOT clear pendingOpen: the old request is still in flight.
+    // It will be cleared when the request settles (onsuccess/onerror).
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Request and transaction wrappers
+// Internal helpers
 // ---------------------------------------------------------------------------
 
 /**
  * Wraps an IDBRequest in a Promise that resolves with the result
  * or rejects with a PersistenceError.
- *
- * Preserves the original browser error through cause.
- * Maps quota errors to QUOTA_EXCEEDED.
  */
 function wrapRequest<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => {
       const error = request.error;
       if (error && error.name === "QuotaExceededError") {
-        reject(
-          new PersistenceError(
-            "QUOTA_EXCEEDED",
-            "Storage quota exceeded. The browser has run out of local storage space.",
-            error,
-          ),
-        );
+        reject(new PersistenceError("QUOTA_EXCEEDED", "Storage quota exceeded.", error));
       } else {
-        reject(
-          new PersistenceError(
-            "TRANSACTION_FAILED",
-            "A local database request failed.",
-            error,
-          ),
-        );
+        reject(new PersistenceError("TRANSACTION_FAILED", "Request failed.", error));
       }
     };
   });
@@ -366,66 +361,42 @@ function wrapRequest<T>(request: IDBRequest<T>): Promise<T> {
 
 /**
  * Wraps an IDBTransaction in a Promise that resolves on complete
- * or rejects with a PersistenceError on error/abort.
- *
- * Preserves the original browser error through cause.
- * Maps quota errors to QUOTA_EXCEEDED.
+ * or rejects on error/abort.
  */
 function wrapTransaction(tx: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => {
       const error = tx.error;
       if (error && error.name === "QuotaExceededError") {
-        reject(
-          new PersistenceError(
-            "QUOTA_EXCEEDED",
-            "Storage quota exceeded. The browser has run out of local storage space.",
-            error,
-          ),
-        );
+        reject(new PersistenceError("QUOTA_EXCEEDED", "Storage quota exceeded.", error));
       } else {
-        reject(
-          new PersistenceError(
-            "TRANSACTION_FAILED",
-            "A local database transaction failed.",
-            error,
-          ),
-        );
+        reject(new PersistenceError("TRANSACTION_FAILED", "Transaction failed.", error));
       }
     };
     tx.onabort = () => {
       const error = tx.error;
       if (error && error.name === "QuotaExceededError") {
-        reject(
-          new PersistenceError(
-            "QUOTA_EXCEEDED",
-            "Storage quota exceeded. The browser has run out of local storage space.",
-            error,
-          ),
-        );
+        reject(new PersistenceError("QUOTA_EXCEEDED", "Storage quota exceeded.", error));
       } else {
-        reject(
-          new PersistenceError(
-            "TRANSACTION_FAILED",
-            "A local database transaction was aborted.",
-            error,
-          ),
-        );
+        reject(new PersistenceError("TRANSACTION_FAILED", "Transaction aborted.", error));
       }
     };
   });
 }
 
-/** Returns the current timestamp in milliseconds. */
+/** Returns the current Unix timestamp in milliseconds. */
 function now(): number {
   return Date.now();
 }
 
-// ---------------------------------------------------------------------------
-// Project name validation
-// ---------------------------------------------------------------------------
-
+/**
+ * Validates a project name. Must be a string, trimmed and non-empty,
+ * within length limits. Throws INVALID_PROJECT_NAME on failure.
+ *
+ * A non-string runtime value throws a typed INVALID_PROJECT_NAME rather
+ * than an untyped .trim() failure.
+ */
 function validateProjectName(name: unknown): void {
   if (typeof name !== "string") {
     throw new PersistenceError("INVALID_PROJECT_NAME", "Project name must be a string.");
@@ -642,7 +613,6 @@ export async function updateProjectEditorState(
   }
 
   // Ensure activeFile is represented in openTabs.
-  // If activeFile is set but not in openTabs, add it.
   if (sanitizedActiveFile && !seenTabs.has(sanitizedActiveFile)) {
     sanitizedTabs.push(sanitizedActiveFile);
     seenTabs.add(sanitizedActiveFile);
@@ -1203,18 +1173,28 @@ export async function setActiveProjectId(projectId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Template operations
+// Commit 3 — Atomic project creation from template
 // ---------------------------------------------------------------------------
 
 /**
- * Creates a project from a template, seeding all template files in one
- * atomic transaction.
+ * Creates a complete project from a template in a single atomic
+ * read-write transaction across the projects, files, and preferences
+ * stores.
  *
- * Validates the template, normalises all template paths, checks for
- * path conflicts, and writes the project and all file records in one
- * read-write transaction.
+ * Steps performed inside one transaction:
+ * 1. Validate and trim the project name.
+ * 2. Reject unavailable templates with TEMPLATE_UNAVAILABLE.
+ * 3. Generate the project UUID.
+ * 4. Create the project at revision 1.
+ * 5. Insert all template files.
+ * 6. Set initial activeFile (index.html if present, else first file).
+ * 7. Set initial openTabs to the same initial file.
+ * 8. Set the active-project preference.
  *
- * Returns the created project.
+ * No partially created project may remain after failure: the entire
+ * operation is one transaction, so any error rolls back all writes.
+ *
+ * Does not remove or modify existing lower-level persistence operations.
  */
 export async function createProjectFromTemplate(
   name: string,
@@ -1222,20 +1202,19 @@ export async function createProjectFromTemplate(
 ): Promise<WorkspaceProject> {
   validateProjectName(name);
 
+  // --- PREFLIGHT: all validation before opening any transaction ---
+
+  // 1. Retrieve and verify the available template.
   const template = getTemplate(templateId);
-  if (!template) {
+  if (!template || !template.available) {
     throw new PersistenceError(
       "TEMPLATE_UNAVAILABLE",
-      `Template not found: ${templateId}`,
+      `Template is not available: ${templateId}`,
     );
   }
-  if (!template.available) {
-    throw new PersistenceError(
-      "TEMPLATE_UNAVAILABLE",
-      template.unavailableReason ?? `Template is not available: ${templateId}`,
-    );
-  }
-  if (!template.files || template.files.length === 0) {
+
+  // 2. Confirm the template contains only valid file definitions.
+  if (!Array.isArray(template.files) || template.files.length === 0) {
     throw new PersistenceError(
       "TEMPLATE_UNAVAILABLE",
       `Template has no file definitions: ${templateId}`,
@@ -1258,48 +1237,83 @@ export async function createProjectFromTemplate(
     normalizedPaths.push(normalisedPath);
   }
 
-  // 4. Check for duplicate paths within the template.
-  const pathSet = new Set(normalizedPaths);
-  if (pathSet.size !== normalizedPaths.length) {
-    throw new PersistenceError(
-      "TEMPLATE_UNAVAILABLE",
-      `Template contains duplicate file paths: ${templateId}`,
-    );
+  // 4. Reject duplicate normalized paths with a typed error.
+  const seenPaths = new Set<string>();
+  for (const p of normalizedPaths) {
+    if (seenPaths.has(p)) {
+      throw new PersistenceError(
+        "TEMPLATE_UNAVAILABLE",
+        `Template contains duplicate path: ${p}`,
+      );
+    }
+    seenPaths.add(p);
   }
 
-  const db = await openWorkspaceDatabase();
-
+  // 5. Build the complete file-record seed list.
   const timestamp = now();
+  const projectId = crypto.randomUUID();
+  const trimmedName = name.trim();
+
+  const fileRecords: WorkspaceFileRecord[] = normalizedPaths.map((p, i) => ({
+    projectId,
+    path: p,
+    kind: "file" as const,
+    contents: template.files[i].contents,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }));
+
+  // 6. Determine activeFile from the normalized seed paths.
+  const indexHtmlPath = normalizedPaths.find((p) => p === "index.html");
+  const initialActiveFile = indexHtmlPath ?? normalizedPaths[0] ?? null;
+
   const project: WorkspaceProject = {
-    id: crypto.randomUUID(),
-    name: name.trim(),
+    id: projectId,
+    name: trimmedName,
     templateId,
-    activeFile: null,
-    openTabs: [],
+    activeFile: initialActiveFile,
+    openTabs: initialActiveFile ? [initialActiveFile] : [],
     createdAt: timestamp,
     updatedAt: timestamp,
     revision: 1,
   };
 
-  const tx = db.transaction([STORE_PROJECTS, STORE_FILES], "readwrite");
+  // --- TRANSACTION: only writes, no validation that can throw ---
+
+  const db = await openWorkspaceDatabase();
+
+  const tx = db.transaction(
+    [STORE_PROJECTS, STORE_FILES, STORE_PREFERENCES],
+    "readwrite",
+  );
+
   const projectStore = tx.objectStore(STORE_PROJECTS);
   const fileStore = tx.objectStore(STORE_FILES);
+  const prefStore = tx.objectStore(STORE_PREFERENCES);
 
-  // Write the project record.
-  projectStore.put(project);
+  try {
+    // Insert the project record (add, not put: duplicate key aborts).
+    projectStore.add(project);
 
-  // Write all file records.
-  for (let i = 0; i < template.files.length; i++) {
-    const file = template.files[i];
-    const normalisedPath = normalizedPaths[i];
-    fileStore.put({
-      projectId: project.id,
-      path: normalisedPath,
-      kind: "file",
-      contents: file.contents,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
+    // Insert all template file records (add, not put: duplicate key aborts).
+    for (const record of fileRecords) {
+      fileStore.add(record);
+    }
+
+    // Set the active project preference.
+    prefStore.put({
+      key: PREF_ACTIVE_PROJECT_ID,
+      value: projectId,
+    } satisfies WorkspacePreferenceRecord);
+  } catch (syncError) {
+    // If a synchronous error occurs after the transaction starts,
+    // explicitly abort before rethrowing.
+    try {
+      tx.abort();
+    } catch {
+      // Abort may throw if already aborted; ignore.
+    }
+    throw syncError;
   }
 
   await wrapTransaction(tx);

@@ -25,7 +25,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, AlertCircle, RotateCw } from "lucide-react";
+import { FileText, AlertCircle, RotateCw, ArrowLeft } from "lucide-react";
 import { EditorTabs } from "./EditorTabs";
 import { CodeEditor } from "./CodeEditor";
 import { getEntry } from "@/lib/workspace/persistence";
@@ -41,8 +41,10 @@ interface EditorPanelProps {
   fileOpenRequest: FileOpenRequest | null;
   /** Called when the project's activeFile or openTabs change. */
   onProjectUpdate: (updated: WorkspaceProject) => void;
-  /** Called when the user clicks Back to Projects. */
+  /** Called when the user clicks Back to Projects (after flush). */
   onBack: () => void;
+  /** Whether project operations are pending (disables Back). */
+  projectOperationPending: boolean;
 }
 
 /** Cache of file contents keyed by path, to avoid re-reading IndexedDB. */
@@ -51,7 +53,7 @@ type ContentCache = Map<string, string>;
 /** Load error per path. */
 type LoadErrorMap = Map<string, string>;
 
-export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, onBack }: EditorPanelProps) {
+export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, onBack, projectOperationPending }: EditorPanelProps) {
   const persistence = useEditorPersistence(project.id, onProjectUpdate);
 
   // Sanitize initial openTabs and activeFile from project metadata.
@@ -105,7 +107,6 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
   const [backError, setBackError] = useState<string | null>(null);
   const contentCacheRef = useRef<ContentCache>(new Map());
   const processedRequestRef = useRef<number>(-1);
-  const latestProjectRevisionRef = useRef<number>(project.revision);
 
   // Seed initial buffers from files array (persisted file records).
   useEffect(() => {
@@ -293,9 +294,10 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
     [activeFile, persistence],
   );
 
-  // Handle Back to Projects.
+  // Handle Back to Projects: flush all dirty files before transitioning.
   const handleBack = useCallback(
     async () => {
+      if (projectOperationPending) return;
       setBackError(null);
       const ok = await persistence.flushAll();
       if (ok) {
@@ -304,7 +306,7 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
         setBackError("Some files could not be saved. Your changes are preserved in memory. Please retry or fix the issue before leaving.");
       }
     },
-    [persistence, onBack],
+    [persistence, onBack, projectOperationPending],
   );
 
   // Retry save for a file.
@@ -322,16 +324,60 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
   if (!activeFile) {
     return (
       <div className="flex flex-col h-full bg-[#0d0e10]">
+        <div className="flex items-center px-4 py-2.5 border-b border-gray-800 bg-gray-900/50">
+          <button
+            onClick={handleBack}
+            disabled={projectOperationPending}
+            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Projects
+          </button>
+        </div>
         <div className="flex flex-col items-center justify-center h-full text-gray-600">
           <FileText className="w-8 h-8 mb-3 opacity-40" />
           <p className="text-sm">Select a file to start editing</p>
         </div>
+        {backError && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-red-950/50 border-t border-red-800/50 text-red-300 text-xs">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span className="flex-1">{backError}</span>
+            <button
+              onClick={() => setBackError(null)}
+              className="px-2 py-0.5 rounded bg-red-800/50 hover:bg-red-800/70 text-red-200 transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+        {persistence.metadataError && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-red-950/50 border-t border-red-800/50 text-red-300 text-xs">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span className="flex-1">Workspace metadata was not saved: {persistence.metadataError}</span>
+            <button
+              onClick={() => persistence.clearMetadataError()}
+              className="px-2 py-0.5 rounded bg-red-800/50 hover:bg-red-800/70 text-red-200 transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
     <div className="flex flex-col h-full bg-[#0d0e10]">
+      <div className="flex items-center px-4 py-2.5 border-b border-gray-800 bg-gray-900/50">
+        <button
+          onClick={handleBack}
+          disabled={projectOperationPending}
+          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Projects
+        </button>
+      </div>
       <EditorTabs
         openTabs={openTabs}
         activeFile={activeFile}
@@ -374,6 +420,19 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
           <span className="flex-1">{backError}</span>
           <button
             onClick={() => setBackError(null)}
+            className="px-2 py-0.5 rounded bg-red-800/50 hover:bg-red-800/70 text-red-200 transition-colors"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+      {/* Metadata error banner */}
+      {persistence.metadataError && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-red-950/50 border-t border-red-800/50 text-red-300 text-xs">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span className="flex-1">Workspace metadata was not saved: {persistence.metadataError}</span>
+          <button
+            onClick={() => persistence.clearMetadataError()}
             className="px-2 py-0.5 rounded bg-red-800/50 hover:bg-red-800/70 text-red-200 transition-colors"
           >
             Dismiss

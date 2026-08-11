@@ -27,11 +27,11 @@
  * allowing destructive state transitions.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { putEntry, updateProjectEditorState } from "@/lib/workspace/persistence";
 import { SAVE_DEBOUNCE_MS } from "@/lib/workspace/constants";
 import { isPersistenceError, type PersistenceErrorCode } from "@/lib/workspace/types";
-import type { WorkspaceProject, WorkspaceFileRecord } from "@/lib/workspace/types";
+import type { WorkspaceProject } from "@/lib/workspace/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -123,6 +123,8 @@ export interface EditorPersistenceApi {
   dirtyPaths: Set<string>;
   /** Save errors per path. */
   saveErrors: Map<string, string>;
+  /** Metadata error, or null. */
+  metadataError: string | null;
   /** Whether any save is currently in flight. */
   isSaving: boolean;
 
@@ -162,6 +164,9 @@ export interface EditorPersistenceApi {
     activeFile: string | null,
   ) => Promise<WorkspaceProject | null>;
 
+  /** Clear the metadata error. */
+  clearMetadataError: () => void;
+
   /** Clear all state for a file (on tab close). */
   clearFile: (path: string) => void;
 
@@ -183,6 +188,7 @@ export function useEditorPersistence(
   // React state mirrors for rendering.
   const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(new Set());
   const [saveErrors, setSaveErrors] = useState<Map<string, string>>(new Map());
+  const [metadataError, setMetadataError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   // Track active save count for isSaving state.
@@ -414,6 +420,7 @@ export function useEditorPersistence(
 
   /**
    * Persist editor metadata using the dedicated operation.
+   * Surfaces metadata persistence errors via metadataError state.
    */
   const persistEditorState = useCallback(
     async (
@@ -424,16 +431,25 @@ export function useEditorPersistence(
         const updated = await queueRef.current.enqueue(() =>
           updateProjectEditorState(projectId, openTabs, activeFile),
         );
+        setMetadataError(null);
         onProjectUpdate(updated);
         return updated;
       } catch (err) {
-        // Surface metadata persistence errors, don't swallow them.
-        // The caller can decide how to display this.
+        // Surface metadata persistence errors as a visible controlled error.
+        const msg = getErrorMessage(err);
+        setMetadataError(msg);
         return null;
       }
     },
     [projectId, onProjectUpdate],
   );
+
+  /**
+   * Clear the metadata error.
+   */
+  const clearMetadataError = useCallback(() => {
+    setMetadataError(null);
+  }, []);
 
   /**
    * Clear all state for a file (on tab close).
@@ -489,17 +505,39 @@ export function useEditorPersistence(
     };
   }, []);
 
-  return {
-    dirtyPaths,
-    saveErrors,
-    isSaving,
-    onContentChange,
-    flushPath,
-    flushAll,
-    retrySave,
-    persistEditorState,
-    clearFile,
-    getBuffer,
-    seedBuffer,
-  };
+  // Memoize the returned API object so it has stable identity across
+  // renders. This prevents effect dependency cycles where a new object
+  // identity triggers effects that cause re-renders.
+  return useMemo(
+    () => ({
+      dirtyPaths,
+      saveErrors,
+      metadataError,
+      isSaving,
+      onContentChange,
+      flushPath,
+      flushAll,
+      retrySave,
+      persistEditorState,
+      clearMetadataError,
+      clearFile,
+      getBuffer,
+      seedBuffer,
+    }),
+    [
+      dirtyPaths,
+      saveErrors,
+      metadataError,
+      isSaving,
+      onContentChange,
+      flushPath,
+      flushAll,
+      retrySave,
+      persistEditorState,
+      clearMetadataError,
+      clearFile,
+      getBuffer,
+      seedBuffer,
+    ],
+  );
 }

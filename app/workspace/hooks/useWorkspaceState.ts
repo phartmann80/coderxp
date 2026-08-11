@@ -251,7 +251,12 @@ export function useWorkspaceState() {
 
   const replaceProjectInState = useCallback((updated: WorkspaceProject) => {
     setProjects((prev) =>
-      prev.map((p) => (p.id === updated.id ? updated : p)),
+      prev.map((p) => {
+        if (p.id !== updated.id) return p;
+        // Monotonic: reject older revisions.
+        if (p.revision > updated.revision) return p;
+        return updated;
+      }),
     );
   }, []);
 

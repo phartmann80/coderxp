@@ -21,7 +21,6 @@
 
 import { useMemo, useState, useCallback, useRef } from "react";
 import {
-  ArrowLeft,
   HardDrive,
   Pencil,
   Trash2,
@@ -114,15 +113,6 @@ export function ProjectShell({
       {/* Project header bar */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-800 bg-gray-900/50">
         <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            disabled={projectOperationPending}
-            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Projects
-          </button>
-          <span className="text-gray-700">/</span>
           {renameMode ? (
             <form onSubmit={handleRenameSubmit} className="flex items-center gap-2">
               <input
@@ -217,6 +207,7 @@ export function ProjectShell({
             fileOpenRequest={fileOpenRequest}
             onProjectUpdate={onProjectUpdate}
             onBack={onBack}
+            projectOperationPending={projectOperationPending}
           />
         </div>
       </div>

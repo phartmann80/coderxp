@@ -24,7 +24,7 @@
  * so this component can safely initialize state from props.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { FileText, AlertCircle, RotateCw, ArrowLeft } from "lucide-react";
 import { EditorTabs } from "./EditorTabs";
 import { CodeEditor } from "./CodeEditor";
@@ -45,6 +45,8 @@ interface EditorPanelProps {
   onBack: () => void;
   /** Whether project operations are pending (disables Back). */
   projectOperationPending: boolean;
+  /** Ref to receive the flushAll function for runtime use. */
+  flushAllRef: RefObject<(() => Promise<boolean>) | null>;
 }
 
 /** Cache of file contents keyed by path, to avoid re-reading IndexedDB. */
@@ -53,7 +55,7 @@ type ContentCache = Map<string, string>;
 /** Load error per path. */
 type LoadErrorMap = Map<string, string>;
 
-export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, onBack, projectOperationPending }: EditorPanelProps) {
+export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, onBack, projectOperationPending, flushAllRef }: EditorPanelProps) {
   const persistence = useEditorPersistence(project.id, onProjectUpdate);
 
   // Sanitize initial openTabs and activeFile from project metadata.
@@ -213,6 +215,14 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
       cancelled = true;
     };
   }, [activeFile, project.id, files, persistence]);
+
+  // Expose flushAll to the parent via ref so the runtime can flush before Run.
+  useEffect(() => {
+    flushAllRef.current = persistence.flushAll;
+    return () => {
+      flushAllRef.current = null;
+    };
+  }, [persistence.flushAll, flushAllRef]);
 
   // beforeunload warning for unsaved changes.
   useEffect(() => {

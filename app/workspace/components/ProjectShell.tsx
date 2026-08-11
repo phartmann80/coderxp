@@ -14,9 +14,10 @@
  * - Delete-confirmation Cancel is disabled while deletion is pending.
  * - Opening another project is disabled while any operation is pending.
  *
- * Does NOT include:
- * - CodeMirror or editable file contents
- * - Terminal, preview panel, run button, fake build status, or fake output
+ * Commit 5: adds runtime panel (Output + Preview) below the editor.
+ * - Real WebContainer process, real stdout/stderr, real server-ready URL.
+ * - Run flushes all dirty editor buffers before starting.
+ * - Generation-based process ownership prevents stale runs.
  */
 
 import { useMemo, useState, useCallback, useRef } from "react";
@@ -30,6 +31,8 @@ import type { WorkspaceProject, WorkspaceFileRecord } from "@/lib/workspace/type
 import { buildFileTree } from "@/lib/workspace/project-tree";
 import { FileTree } from "./FileTree";
 import { EditorPanel } from "./EditorPanel";
+import { RuntimePanel } from "./RuntimePanel";
+import { useRuntime } from "../hooks/useRuntime";
 import type { FileOpenRequest } from "@/app/workspace/hooks/useEditorPersistence";
 
 interface ProjectShellProps {
@@ -63,6 +66,14 @@ export function ProjectShell({
   const [renameMode, setRenameMode] = useState(false);
   const [renameValue, setRenameValue] = useState(project.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Ref to hold the flushAll function from EditorPanel's persistence hook.
+  // This lets the runtime flush dirty buffers before starting a Run.
+  const flushAllRef = useRef<(() => Promise<boolean>) | null>(null);
+
+  const runtime = useRuntime(project.id, files, async () => {
+    return flushAllRef.current ? flushAllRef.current() : Promise.resolve(true);
+  });
 
   // Close rename mode and sync the displayed name when rename succeeds
   // (including on retry). Uses the monotonic renameSuccessVersion token
@@ -198,17 +209,34 @@ export function ProjectShell({
           )}
         </div>
 
-        {/* Editor panel */}
-        <div className="flex-1 overflow-hidden">
-          <EditorPanel
-            key={project.id}
-            project={project}
-            files={files}
-            fileOpenRequest={fileOpenRequest}
-            onProjectUpdate={onProjectUpdate}
-            onBack={onBack}
-            projectOperationPending={projectOperationPending}
-          />
+        {/* Editor + Runtime panel (editor on top, runtime below) */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex-1 overflow-hidden">
+            <EditorPanel
+              key={project.id}
+              project={project}
+              files={files}
+              fileOpenRequest={fileOpenRequest}
+              onProjectUpdate={onProjectUpdate}
+              onBack={onBack}
+              projectOperationPending={projectOperationPending}
+              flushAllRef={flushAllRef}
+            />
+          </div>
+          {/* Runtime panel: Output + Preview */}
+          <div className="h-[280px] flex-shrink-0">
+            <RuntimePanel
+              output={runtime.output}
+              previewUrl={runtime.previewUrl}
+              runtimeState={runtime.state}
+              isStarting={runtime.isStarting}
+              isRunning={runtime.isRunning}
+              previewKey={0}
+              onRun={runtime.run}
+              onStop={runtime.stop}
+              onRefresh={runtime.refreshPreview}
+            />
+          </div>
         </div>
       </div>
 

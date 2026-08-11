@@ -33,6 +33,7 @@ export default function WorkspaceShell() {
     handleCreateProject,
     handleRenameProject,
     handleDeleteProject,
+    handleProjectUpdate,
     backToLauncher,
     retry,
     dismissError,
@@ -102,6 +103,7 @@ export default function WorkspaceShell() {
             onBack={backToLauncher}
             onRename={(newName) => handleRenameProject(activeProject.id, newName)}
             onDelete={() => handleDeleteProject(activeProject.id)}
+            onProjectUpdate={handleProjectUpdate}
           />
         </div>
       )}

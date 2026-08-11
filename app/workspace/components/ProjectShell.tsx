@@ -19,19 +19,18 @@
  * - Terminal, preview panel, run button, fake build status, or fake output
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import {
   ArrowLeft,
   HardDrive,
   Pencil,
   Trash2,
   X,
-  File as FileIcon,
-  Folder,
 } from "lucide-react";
 import type { WorkspaceProject, WorkspaceFileRecord } from "@/lib/workspace/types";
 import { buildFileTree } from "@/lib/workspace/project-tree";
 import { FileTree } from "./FileTree";
+import { EditorPanel } from "./EditorPanel";
 
 interface ProjectShellProps {
   project: WorkspaceProject;
@@ -43,6 +42,7 @@ interface ProjectShellProps {
   onBack: () => void;
   onRename: (newName: string) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
+  onProjectUpdate: (updated: WorkspaceProject) => void;
 }
 
 export function ProjectShell({
@@ -55,8 +55,10 @@ export function ProjectShell({
   onBack,
   onRename,
   onDelete,
+  onProjectUpdate,
 }: ProjectShellProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(project.activeFile);
+  const [fileToOpen, setFileToOpen] = useState<string | null>(null);
   const [renameMode, setRenameMode] = useState(false);
   const [renameValue, setRenameValue] = useState(project.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -74,11 +76,6 @@ export function ProjectShell({
   }
 
   const tree = useMemo(() => buildFileTree(files), [files]);
-
-  const selectedFile = useMemo(
-    () => files.find((f) => f.path === selectedPath) ?? null,
-    [files, selectedPath],
-  );
 
   const handleRenameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,17 +97,14 @@ export function ProjectShell({
     // On failure, the confirmation modal stays open with the project context.
   };
 
-  const getFileKind = (path: string): string => {
-    const ext = path.split(".").pop()?.toLowerCase();
-    switch (ext) {
-      case "html": return "HTML";
-      case "css": return "CSS";
-      case "js": return "JavaScript";
-      case "mjs": return "ES Module";
-      case "json": return "JSON";
-      default: return "File";
+  const handleFileSelect = useCallback((path: string) => {
+    setSelectedPath(path);
+    // Only open files (not directories) in the editor.
+    const record = files.find((f) => f.path === path);
+    if (record && record.kind === "file") {
+      setFileToOpen(path);
     }
-  };
+  }, [files]);
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -206,42 +200,20 @@ export function ProjectShell({
             <FileTreeWrapper
               nodes={tree}
               selectedPath={selectedPath}
-              onSelect={setSelectedPath}
+              onSelect={handleFileSelect}
             />
           )}
         </div>
 
-        {/* File summary */}
-        <div className="flex-1 p-6 overflow-y-auto">
-          {selectedFile ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                {selectedFile.kind === "directory" ? (
-                  <Folder className="w-4 h-4 text-gray-500" />
-                ) : (
-                  <FileIcon className="w-4 h-4 text-gray-500" />
-                )}
-                <span className="text-sm text-gray-100 font-medium">{selectedFile.path}</span>
-              </div>
-              {/* Show the actual stored kind (file/directory) */}
-              <div className="text-xs text-gray-500">
-                Kind: {selectedFile.kind === "directory" ? "directory" : "file"}
-                {selectedFile.kind === "file" && (
-                  <span className="text-gray-600"> ({getFileKind(selectedFile.path)})</span>
-                )}
-              </div>
-              <div className="text-xs text-gray-600">
-                Last modified: {new Date(selectedFile.updatedAt).toLocaleString()}
-              </div>
-              <p className="text-xs text-gray-600 mt-4">
-                File editing is not available in this version. CodeMirror editor will be introduced in a future commit.
-              </p>
-            </div>
-          ) : (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-sm text-gray-600">Select a file from the tree to view its details.</p>
-            </div>
-          )}
+        {/* Editor panel */}
+        <div className="flex-1 overflow-hidden">
+          <EditorPanel
+            key={project.id}
+            project={project}
+            files={files}
+            fileToOpen={fileToOpen}
+            onProjectUpdate={onProjectUpdate}
+          />
         </div>
       </div>
 

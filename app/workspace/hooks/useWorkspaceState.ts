@@ -845,6 +845,20 @@ export function useWorkspaceState() {
     dismissFailure();
   }, [dismissFailure]);
 
+  /**
+   * Handles project state updates from the editor (activeFile, openTabs).
+   * Updates both the active project state and the projects list.
+   * Does NOT claim a workspace operation: this is a lightweight metadata
+   * update, not a project lifecycle operation.
+   */
+  const handleProjectUpdate = useCallback(
+    (updated: WorkspaceProject) => {
+      setActiveProject(updated);
+      replaceProjectInState(updated);
+    },
+    [replaceProjectInState],
+  );
+
   return {
     view,
     projects,
@@ -863,6 +877,7 @@ export function useWorkspaceState() {
     handleCreateProject,
     handleRenameProject,
     handleDeleteProject,
+    handleProjectUpdate,
     backToLauncher,
     retry,
     dismissError,

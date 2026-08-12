@@ -231,7 +231,7 @@ export function ProjectShell({
               runtimeState={runtime.state}
               isStarting={runtime.isStarting}
               isRunning={runtime.isRunning}
-              previewKey={0}
+              previewKey={runtime.previewKey}
               onRun={runtime.run}
               onStop={runtime.stop}
               onRefresh={runtime.refreshPreview}

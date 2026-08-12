@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getRuntime, type RuntimeState, type OutputLine } from "@/lib/workspace/runtime";
+import { listProjectEntries } from "@/lib/workspace/persistence";
 import type { WorkspaceFileRecord } from "@/lib/workspace/types";
 
 export interface RuntimeApi {
@@ -33,6 +34,8 @@ export interface RuntimeApi {
   isStarting: boolean;
   /** Whether the runtime is currently running. */
   isRunning: boolean;
+  /** Key to force iframe refresh. */
+  previewKey: number;
 
   /**
    * Run the current project. Flushes all dirty editor buffers first.
@@ -115,14 +118,34 @@ export function useRuntime(
     setError(null);
     setPreviewUrl(null);
 
-    // Re-mount the latest file contents (from IndexedDB via the parent).
-    // The parent passes the latest files array, so we remount before running.
-    if (projectId && files.length > 0) {
-      await runtimeRef.current.mountProject(files);
+    // Read the authoritative current project files from IndexedDB.
+    // The files prop is the snapshot from when the project was opened;
+    // editor putEntry() saves to IndexedDB but does not refresh that array.
+    // After a successful flush, IndexedDB has the latest content.
+    if (!projectId) {
+      setError("No project open.");
+      setState("error");
+      return;
     }
 
+    let freshFiles: WorkspaceFileRecord[];
+    try {
+      freshFiles = await listProjectEntries(projectId);
+    } catch {
+      setError("Failed to read project files from storage.");
+      setState("error");
+      return;
+    }
+
+    if (freshFiles.length === 0) {
+      setError("Project has no files to run.");
+      setState("error");
+      return;
+    }
+
+    await runtimeRef.current.mountProject(freshFiles);
     await runtimeRef.current.run();
-  }, [flushAll, projectId, files]);
+  }, [flushAll, projectId]);
 
   const stop = useCallback(async () => {
     if (!runtimeRef.current) return;
@@ -153,6 +176,7 @@ export function useRuntime(
     error,
     isStarting: state === "booting" || state === "mounting" || state === "starting",
     isRunning: state === "running",
+    previewKey,
     run,
     stop,
     refreshPreview,

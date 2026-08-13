@@ -140,7 +140,11 @@ export function ProjectLauncher({ projects, creating, openingProjectId, retrying
                     )}
                     {isAvailable && (
                       <div className="text-xs text-gray-500">
-                        {template.id === "react-ts" ? "React, TypeScript, Vite" : "HTML, CSS, JavaScript"}
+                        {template.id === "react-ts"
+                          ? "React, TypeScript, Vite"
+                          : template.id === "nextjs-ts"
+                            ? "Next.js, TypeScript, App Router"
+                            : "HTML, CSS, JavaScript"}
                       </div>
                     )}
                   </button>
@@ -191,7 +195,13 @@ export function ProjectLauncher({ projects, creating, openingProjectId, retrying
                     <div>
                       <div className="text-sm text-gray-100 font-medium">{project.name}</div>
                       <div className="text-xs text-gray-500">
-                        {project.templateId === "static-html" ? "Static HTML" : project.templateId}
+                        {project.templateId === "static-html"
+                          ? "Static HTML"
+                          : project.templateId === "react-ts"
+                            ? "React + TypeScript"
+                            : project.templateId === "nextjs-ts"
+                              ? "Next.js + TypeScript"
+                              : project.templateId}
                       </div>
                     </div>
                   </div>

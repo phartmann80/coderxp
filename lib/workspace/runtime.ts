@@ -63,7 +63,7 @@ export type ErrorCallback = (message: string) => void;
 // ---------------------------------------------------------------------------
 
 /** Which kind of runtime to use for a project. */
-export type RuntimeKind = "static" | "react";
+export type RuntimeKind = "static" | "react" | "next";
 
 // ---------------------------------------------------------------------------
 // Runtime manager
@@ -200,6 +200,7 @@ export class WorkspaceRuntime {
    *
    * For static projects: spawns `node server.mjs`.
    * For React projects: runs `npm install` (if needed) then `npm run dev`.
+   * For Next.js projects: runs `npm install` (if needed) then `npm run dev`.
    *
    * Uses a generation token so a stale Run cannot overwrite a newer one.
    * The caller must ensure files are flushed (saved) before calling this.
@@ -223,6 +224,8 @@ export class WorkspaceRuntime {
 
       if (this.runtimeKind === "react") {
         await this.runReact(container, gen);
+      } else if (this.runtimeKind === "next") {
+        await this.runNext(container, gen);
       } else {
         await this.runStatic(container, gen);
       }
@@ -273,8 +276,41 @@ export class WorkspaceRuntime {
    *
    * If dependencies are not yet installed, runs `npm install` first.
    * Then runs `npm run dev` which starts Vite with --host 0.0.0.0.
+   *
+   * node_modules are preserved across Run presses within the same mount
+   * session. A remount (mountProject) resets depsInstalled, so switching
+   * projects or pressing Run after editing triggers a remount but reuses
+   * the existing node_modules if the same project is remounted.
    */
   private async runReact(container: WebContainer, gen: number): Promise<void> {
+    await this.runDevRuntime(container, gen);
+  }
+
+  /**
+   * Run the Next.js + TypeScript dev server.
+   *
+   * If dependencies are not yet installed, runs `npm install` first.
+   * Then runs `npm run dev` which starts the Next.js dev server.
+   *
+   * Next.js dev server listens on 0.0.0.0 via the dev script in package.json.
+   */
+  private async runNext(container: WebContainer, gen: number): Promise<void> {
+    await this.runDevRuntime(container, gen);
+  }
+
+  /**
+   * Shared runtime logic for React (Vite) and Next.js dev servers.
+   *
+   * Both runtimes follow the same pattern:
+   * 1. npm install (if depsInstalled is false)
+   * 2. npm run dev (starts the dev server)
+   * 3. Wait for server-ready event from WebContainer
+   *
+   * node_modules persist in the WebContainer filesystem across Run presses
+   * within the same mount session. depsInstalled is only reset when
+   * mountProject is called (new project or explicit remount).
+   */
+  private async runDevRuntime(container: WebContainer, gen: number): Promise<void> {
     // Install dependencies if not already installed.
     if (!this.depsInstalled) {
       this.setState("installing");
@@ -304,7 +340,7 @@ export class WorkspaceRuntime {
       this.depsInstalled = true;
     }
 
-    // Start the Vite dev server.
+    // Start the dev server.
     this.setState("starting");
 
     const devProcess = await container.spawn("npm", ["run", "dev"], {
@@ -444,5 +480,6 @@ export function getRuntime(): WorkspaceRuntime {
  */
 export function getRuntimeKind(templateId: string): RuntimeKind {
   if (templateId === "react-ts") return "react";
+  if (templateId === "nextjs-ts") return "next";
   return "static";
 }

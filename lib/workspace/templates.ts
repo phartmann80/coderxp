@@ -446,6 +446,171 @@ button:hover {
 `;
 
 // ---------------------------------------------------------------------------
+// Next.js + TypeScript template — file contents
+// ---------------------------------------------------------------------------
+
+const NEXT_PACKAGE_JSON = JSON.stringify(
+  {
+    name: "coderxp-next-project",
+    version: "1.0.0",
+    private: true,
+    scripts: {
+      dev: "next dev -H 0.0.0.0",
+      build: "next build",
+      start: "next start",
+    },
+    dependencies: {
+      next: "^15.1.0",
+      react: "^19.0.0",
+      "react-dom": "^19.0.0",
+    },
+    devDependencies: {
+      "@types/node": "^22.0.0",
+      "@types/react": "^19.0.0",
+      "@types/react-dom": "^19.0.0",
+      typescript: "^5.6.0",
+    },
+  },
+  null,
+  2,
+) + "\n";
+
+const NEXT_TSCONFIG_JSON = JSON.stringify(
+  {
+    compilerOptions: {
+      target: "ES2020",
+      lib: ["ES2020", "DOM", "DOM.Iterable"],
+      module: "ESNext",
+      skipLibCheck: true,
+      moduleResolution: "bundler",
+      allowImportingTsExtensions: true,
+      isolatedModules: true,
+      moduleDetection: "force",
+      noEmit: true,
+      jsx: "preserve",
+      strict: true,
+      noUnusedLocals: true,
+      noUnusedParameters: true,
+      noFallthroughCasesInSwitch: true,
+    },
+    include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+    exclude: ["node_modules"],
+  },
+  null,
+  2,
+) + "\n";
+
+const NEXT_CONFIG_TS = `import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {};
+
+export default nextConfig;
+`;
+
+const NEXT_ENV_D_TS = `/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+`;
+
+const NEXT_LAYOUT_TSX = `import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "CoderXP Next.js Project",
+  description: "Built with CoderXP",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+`;
+
+const NEXT_PAGE_TSX = `import { useState } from "react";
+
+export default function Home() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <main>
+      <h1>CoderXP</h1>
+      <p>Edit <code>app/page.tsx</code> and press Run to see changes.</p>
+      <button onClick={() => setCount((c) => c + 1)}>
+        Count: {count}
+      </button>
+    </main>
+  );
+}
+`;
+
+const NEXT_GLOBALS_CSS = `:root {
+  font-family: system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+main {
+  text-align: center;
+  padding: 2rem;
+}
+
+h1 {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+p {
+  color: #94a3b8;
+  margin-bottom: 1.5rem;
+}
+
+code {
+  background: #1e293b;
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.9em;
+}
+
+button {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: #3b82f6;
+  color: white;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button:hover {
+  background: #2563eb;
+}
+`;
+
+// ---------------------------------------------------------------------------
 // Template definitions
 // ---------------------------------------------------------------------------
 
@@ -496,9 +661,16 @@ export const PROJECT_TEMPLATES: Record<ProjectTemplateId, ProjectTemplate> = {
   "nextjs-ts": {
     id: "nextjs-ts",
     name: "Next.js + TypeScript",
-    available: false,
-    unavailableReason: "Runtime verification pending",
-    files: [],
+    available: true,
+    files: [
+      { path: "package.json", contents: NEXT_PACKAGE_JSON },
+      { path: "tsconfig.json", contents: NEXT_TSCONFIG_JSON },
+      { path: "next.config.ts", contents: NEXT_CONFIG_TS },
+      { path: "next-env.d.ts", contents: NEXT_ENV_D_TS },
+      { path: "app/layout.tsx", contents: NEXT_LAYOUT_TSX },
+      { path: "app/page.tsx", contents: NEXT_PAGE_TSX },
+      { path: "app/globals.css", contents: NEXT_GLOBALS_CSS },
+    ],
   },
 };
 
@@ -520,8 +692,7 @@ export const TEMPLATE_METADATA: TemplateMetadata[] = [
   {
     id: "nextjs-ts",
     name: "Next.js + TypeScript",
-    available: false,
-    unavailableReason: "Runtime verification pending",
+    available: true,
   },
 ];
 

@@ -34,11 +34,9 @@ import {
   putEntry,
   renameEntry,
   deleteEntry,
-  listProjectEntries,
-  getProject,
 } from "@/lib/workspace/persistence";
 import { isPersistenceError, type PersistenceErrorCode } from "@/lib/workspace/types";
-import { getEntryName, getParentPath } from "@/lib/workspace/path-utils";
+import { getEntryName } from "@/lib/workspace/path-utils";
 import type { FileOpenRequest } from "@/app/workspace/hooks/useEditorPersistence";
 
 interface ProjectShellProps {
@@ -55,7 +53,7 @@ interface ProjectShellProps {
   onDelete: () => Promise<boolean>;
   onProjectUpdate: (updated: WorkspaceProject) => void;
   /** Called to trigger a file-list refresh in the parent. */
-  onRefreshFiles: () => void;
+  onRefreshFiles: () => Promise<void>;
 }
 
 /** Controlled error messages for file operations. */
@@ -117,10 +115,6 @@ export function ProjectShell({
 
   // Ref to hold the flushAll function from EditorPanel's persistence hook.
   const flushAllRef = useRef<(() => Promise<boolean>) | null>(null);
-  // Ref to hold the flushPath function for dirty-file protection.
-  const flushPathRef = useRef<((path: string) => Promise<boolean>) | null>(null);
-  // Ref to hold the clearFile function for tab cleanup after delete.
-  const clearFileRef = useRef<((path: string) => void) | null>(null);
 
   const runtime = useRuntime(project.id, files, async () => {
     return flushAllRef.current ? flushAllRef.current() : Promise.resolve(true);
@@ -165,7 +159,7 @@ export function ProjectShell({
 
   /** Refresh the authoritative project entries and update workspace state. */
   const refreshProjectFiles = useCallback(async (): Promise<void> => {
-    onRefreshFiles();
+    await onRefreshFiles();
   }, [onRefreshFiles]);
 
   /** Open a file in the editor and make it active. */
@@ -186,6 +180,15 @@ export function ProjectShell({
     setFileOpError(null);
 
     try {
+      // Flush all dirty buffers before remounting EditorPanel.
+      if (flushAllRef.current) {
+        const flushOk = await flushAllRef.current();
+        if (!flushOk) {
+          setFileOpError("Could not save all files. Your changes are preserved.");
+          return;
+        }
+      }
+
       await putEntry(project.id, trimmed, "file", "");
       await refreshProjectFiles();
 
@@ -216,6 +219,15 @@ export function ProjectShell({
     setFileOpError(null);
 
     try {
+      // Flush all dirty buffers before remounting EditorPanel.
+      if (flushAllRef.current) {
+        const flushOk = await flushAllRef.current();
+        if (!flushOk) {
+          setFileOpError("Could not save all files. Your changes are preserved.");
+          return;
+        }
+      }
+
       await putEntry(project.id, folderPath, "directory");
       await refreshProjectFiles();
 
@@ -237,33 +249,17 @@ export function ProjectShell({
       setFileOpError(null);
 
       try {
-        // Dirty-file protection: if the renamed entry is a file and it's dirty,
-        // flush it first. If flush fails, abort the rename.
-        const entry = files.find((f) => f.path === oldPath);
-        if (entry && entry.kind === "file" && flushPathRef.current) {
-          const flushOk = await flushPathRef.current(oldPath);
-          if (!flushOk) {
-            setFileOpError("Could not save the file before renaming. Your changes are preserved.");
-            return false;
-          }
-        }
-
-        // Also flush any dirty descendant files if renaming a directory.
-        if (entry && entry.kind === "directory" && flushAllRef.current) {
+        // Flush all dirty buffers before remounting EditorPanel.
+        if (flushAllRef.current) {
           const flushOk = await flushAllRef.current();
           if (!flushOk) {
-            setFileOpError("Could not save all files before renaming. Your changes are preserved.");
+            setFileOpError("Could not save all files. Your changes are preserved.");
             return false;
           }
         }
 
         await renameEntry(project.id, oldPath, newPath);
         await refreshProjectFiles();
-
-        // Update selected path if the renamed entry was selected.
-        if (selectedPath === oldPath) {
-          setSelectedPath(newPath);
-        }
 
         return true;
       } catch (err) {
@@ -273,7 +269,7 @@ export function ProjectShell({
         setFileOpInProgress(false);
       }
     },
-    [fileOpInProgress, files, project.id, selectedPath, refreshProjectFiles],
+    [fileOpInProgress, project.id, refreshProjectFiles],
   );
 
   // --- Delete Entry (from FileTree or toolbar) ---
@@ -290,45 +286,17 @@ export function ProjectShell({
     setFileOpError(null);
 
     try {
-      // Dirty-file protection: flush the file if it's dirty before deleting.
-      const entry = files.find((f) => f.path === entryToDelete);
-      if (entry && entry.kind === "file" && flushPathRef.current) {
-        const flushOk = await flushPathRef.current(entryToDelete);
-        if (!flushOk) {
-          setFileOpError("Could not save the file before deleting. Your changes are preserved.");
-          return;
-        }
-      }
-
-      // Also flush all dirty files if deleting a directory (descendants may be dirty).
-      if (entry && entry.kind === "directory" && flushAllRef.current) {
+      // Flush all dirty buffers before remounting EditorPanel.
+      if (flushAllRef.current) {
         const flushOk = await flushAllRef.current();
         if (!flushOk) {
-          setFileOpError("Could not save all files before deleting. Your changes are preserved.");
+          setFileOpError("Could not save all files. Your changes are preserved.");
           return;
         }
       }
 
       await deleteEntry(project.id, entryToDelete);
       await refreshProjectFiles();
-
-      // Clear the deleted file from the editor if it was open.
-      if (clearFileRef.current) {
-        clearFileRef.current(entryToDelete);
-      }
-
-      // If the deleted entry was the selected path, pick a sensible survivor.
-      if (selectedPath === entryToDelete) {
-        // Try to find a surviving file to select.
-        const remainingFiles = files.filter(
-          (f) => f.kind === "file" && f.path !== entryToDelete,
-        );
-        if (remainingFiles.length > 0) {
-          setSelectedPath(remainingFiles[0].path);
-        } else {
-          setSelectedPath(null);
-        }
-      }
 
       setEntryToDelete(null);
     } catch (err) {
@@ -558,7 +526,7 @@ export function ProjectShell({
         <div className="flex flex-1 flex-col overflow-hidden">
           <div className="flex-1 overflow-hidden">
             <EditorPanel
-              key={project.id}
+              key={`${project.id}-${fileOperationVersion}`}
               project={project}
               files={files}
               fileOpenRequest={fileOpenRequest}
@@ -566,8 +534,6 @@ export function ProjectShell({
               onBack={onBack}
               projectOperationPending={projectOperationPending}
               flushAllRef={flushAllRef}
-              flushPathRef={flushPathRef}
-              clearFileRef={clearFileRef}
             />
           </div>
           {/* Runtime panel: Output + Preview */}

@@ -47,10 +47,6 @@ interface EditorPanelProps {
   projectOperationPending: boolean;
   /** Ref to receive the flushAll function for runtime use. */
   flushAllRef: RefObject<(() => Promise<boolean>) | null>;
-  /** Ref to receive the flushPath function for dirty-file protection. */
-  flushPathRef: RefObject<((path: string) => Promise<boolean>) | null>;
-  /** Ref to receive the clearFile function for tab cleanup after delete. */
-  clearFileRef: RefObject<((path: string) => void) | null>;
 }
 
 /** Cache of file contents keyed by path, to avoid re-reading IndexedDB. */
@@ -59,7 +55,7 @@ type ContentCache = Map<string, string>;
 /** Load error per path. */
 type LoadErrorMap = Map<string, string>;
 
-export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, onBack, projectOperationPending, flushAllRef, flushPathRef, clearFileRef }: EditorPanelProps) {
+export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, onBack, projectOperationPending, flushAllRef }: EditorPanelProps) {
   const persistence = useEditorPersistence(project.id, onProjectUpdate);
 
   // Sanitize initial openTabs and activeFile from project metadata.
@@ -227,22 +223,6 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
       flushAllRef.current = null;
     };
   }, [persistence.flushAll, flushAllRef]);
-
-  // Expose flushPath to the parent for dirty-file protection during rename/delete.
-  useEffect(() => {
-    flushPathRef.current = persistence.flushPath;
-    return () => {
-      flushPathRef.current = null;
-    };
-  }, [persistence.flushPath, flushPathRef]);
-
-  // Expose clearFile to the parent for tab cleanup after file deletion.
-  useEffect(() => {
-    clearFileRef.current = persistence.clearFile;
-    return () => {
-      clearFileRef.current = null;
-    };
-  }, [persistence.clearFile, clearFileRef]);
 
   // beforeunload warning for unsaved changes.
   useEffect(() => {

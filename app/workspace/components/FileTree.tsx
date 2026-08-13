@@ -114,7 +114,7 @@ function FileTreeNodeView({ node, depth, selectedPath, onSelect, onRename, onDel
     return (
       <div>
         <div
-          className="flex items-center w-full text-left text-sm rounded transition-colors"
+          className="group flex items-center w-full text-left text-sm rounded transition-colors"
           style={{ paddingLeft: `${depth * 12 + 4}px` }}
         >
           {/* Chevron control: toggles expansion only */}

@@ -1,14 +1,18 @@
 "use client";
 
 /**
- * Runtime panel for CoderXP M2 Workspace Alpha.
+ * Runtime panel for CoderXP M3.1.
  *
- * Commit 5 scope: bottom panel with Output and Preview tabs.
+ * Bottom workspace panel with Terminal, Output, and Preview tabs.
  *
  * Layout:
- * ┌ Output | Preview ────────────────────────┐
- * │  [tab content]                          │
- * └─────────────────────────────────────────┘
+ * ┌ Terminal | Output | Preview ────────────────┐
+ * │  [tab content]                              │
+ * └─────────────────────────────────────────────┘
+ *
+ * Terminal: interactive user/agent shell (xterm.js + WebContainer jsh)
+ * Output:   managed CoderXP runtime/process output (read-only)
+ * Preview:  live preview iframe from the runtime server-ready URL
  *
  * Sits below the editor in the ProjectShell layout.
  */
@@ -16,7 +20,10 @@
 import { useState } from "react";
 import { OutputPanel } from "./OutputPanel";
 import { PreviewPanel } from "./PreviewPanel";
+import { TerminalPanel } from "./TerminalPanel";
 import type { RuntimeState, OutputLine } from "@/lib/workspace/runtime";
+
+type PanelTab = "terminal" | "output" | "preview";
 
 interface RuntimePanelProps {
   /** Output lines from the runtime process. */
@@ -50,12 +57,22 @@ export function RuntimePanel({
   onStop,
   onRefresh,
 }: RuntimePanelProps) {
-  const [activeTab, setActiveTab] = useState<"output" | "preview">("preview");
+  const [activeTab, setActiveTab] = useState<PanelTab>("preview");
 
   return (
     <div className="flex flex-col h-full border-t border-gray-800">
       {/* Tab bar */}
       <div className="flex items-center border-b border-gray-800 bg-[#0d0e10]">
+        <button
+          onClick={() => setActiveTab("terminal")}
+          className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeTab === "terminal"
+              ? "text-gray-200 border-b-2 border-cyan-500"
+              : "text-gray-500 hover:text-gray-400"
+          }`}
+        >
+          Terminal
+        </button>
         <button
           onClick={() => setActiveTab("output")}
           className={`px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -84,9 +101,13 @@ export function RuntimePanel({
 
       {/* Tab content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === "output" ? (
+        {activeTab === "terminal" && (
+          <TerminalPanel active={true} />
+        )}
+        {activeTab === "output" && (
           <OutputPanel output={output} />
-        ) : (
+        )}
+        {activeTab === "preview" && (
           <PreviewPanel
             previewUrl={previewUrl}
             runtimeState={runtimeState}
@@ -103,13 +124,13 @@ export function RuntimePanel({
   );
 }
 
-/**
- * Small status indicator showing the current runtime state.
- * Only shows states that correspond to actual runtime work.
- */
+// ---------------------------------------------------------------------------
+// Runtime status indicator
+// ---------------------------------------------------------------------------
+
 function RuntimeStatusIndicator({ state }: { state: RuntimeState }) {
   const colors: Record<RuntimeState, string> = {
-    idle: "text-gray-600",
+    idle: "text-gray-500",
     booting: "text-amber-400",
     mounting: "text-amber-400",
     starting: "text-amber-400",

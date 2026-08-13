@@ -1,10 +1,9 @@
 /**
- * WebContainer runtime client for CoderXP M2 Workspace Alpha.
+ * WebContainer runtime client for CoderXP.
  *
- * Commit 1 scope: lazy singleton contract only. Does NOT boot,
- * mount, or run any processes. The singleton is created on first
- * access but WebContainer.boot() is not called until explicitly
- * invoked by a future commit.
+ * M3.1: boot timeout added. The boot promise races against a configurable
+ * timeout. On timeout, the promise rejects with a clear error so callers
+ * can surface a retry UI instead of hanging at "mounting" forever.
  *
  * Binding corrections applied:
  * - COEP mode: require-corp (not credentialless)
@@ -27,19 +26,27 @@ let booted = false;
 /** Promise tracking an in-progress boot. */
 let bootPromise: Promise<WebContainer> | null = null;
 
+/** Boot timeout timer (for cancellation on success). */
+let bootTimer: ReturnType<typeof setTimeout> | null = null;
+
 /**
  * Boots the WebContainer singleton if not already booted.
  *
  * Uses the binding boot options: coep require-corp,
  * forwardPreviewErrors, workdirName coderxp.
  *
+ * M3.1: A configurable boot timeout (default 15s) prevents the boot
+ * from hanging indefinitely. On timeout, the promise rejects with a
+ * clear error so callers can surface a retry UI.
+ *
  * On failure, clears the pending promise and resets state so
  * a later retry is possible. Does not create multiple boot
  * attempts concurrently.
  *
+ * @param timeoutMs Boot timeout in milliseconds (default 15000).
  * @returns the booted WebContainer instance
  */
-export async function bootWebContainer(): Promise<WebContainer> {
+export async function bootWebContainer(timeoutMs: number = 15000): Promise<WebContainer> {
   if (booted && webContainerInstance) {
     return webContainerInstance;
   }
@@ -48,13 +55,31 @@ export async function bootWebContainer(): Promise<WebContainer> {
     return bootPromise;
   }
 
-  bootPromise = WebContainer.boot(WEBCONTAINER_BOOT_OPTIONS)
+  // Race the boot against a timeout.
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    bootTimer = setTimeout(() => {
+      reject(new Error(`WebContainer boot timed out after ${timeoutMs / 1000}s. The browser environment may not support WebContainers.`));
+    }, timeoutMs);
+  });
+
+  bootPromise = Promise.race([
+    WebContainer.boot(WEBCONTAINER_BOOT_OPTIONS),
+    timeoutPromise,
+  ])
     .then((instance) => {
-      webContainerInstance = instance;
+      if (bootTimer) {
+        clearTimeout(bootTimer);
+        bootTimer = null;
+      }
+      webContainerInstance = instance as WebContainer;
       booted = true;
-      return instance;
+      return webContainerInstance;
     })
     .catch((error: unknown) => {
+      if (bootTimer) {
+        clearTimeout(bootTimer);
+        bootTimer = null;
+      }
       webContainerInstance = null;
       booted = false;
       throw error;
@@ -82,6 +107,10 @@ export function teardownWebContainer(): void {
     webContainerInstance = null;
     booted = false;
     bootPromise = null;
+  }
+  if (bootTimer) {
+    clearTimeout(bootTimer);
+    bootTimer = null;
   }
 }
 

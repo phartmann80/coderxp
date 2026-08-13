@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getRuntime, getRuntimeKind, type RuntimeState, type RuntimeKind, type OutputLine } from "@/lib/workspace/runtime";
+import { getTerminal } from "@/lib/workspace/terminal";
 import { listProjectEntries } from "@/lib/workspace/persistence";
 import type { WorkspaceFileRecord } from "@/lib/workspace/types";
 
@@ -178,6 +179,11 @@ export function useRuntime(
     setOutput([]);
     setError(null);
     setPreviewUrl(null);
+
+    // Reset the terminal so it operates on the new project only.
+    const terminal = getTerminal();
+    await terminal.reset();
+
     const kind = getRuntimeKind(templateId ?? "static-html");
     await runtimeRef.current.switchProject(newFiles, kind);
   }, [templateId]);

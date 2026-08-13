@@ -30,7 +30,9 @@ import { buildFileTree } from "@/lib/workspace/project-tree";
 import { FileTree } from "./FileTree";
 import { EditorPanel } from "./EditorPanel";
 import { RuntimePanel } from "./RuntimePanel";
+import { TerminalPanel } from "./TerminalPanel";
 import { useRuntime } from "../hooks/useRuntime";
+import { getTerminal } from "@/lib/workspace/terminal";
 import {
   putEntry,
   renameEntry,

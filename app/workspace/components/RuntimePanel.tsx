@@ -21,9 +21,11 @@ import { useState } from "react";
 import { OutputPanel } from "./OutputPanel";
 import { PreviewPanel } from "./PreviewPanel";
 import { TerminalPanel } from "./TerminalPanel";
+import { CommandPanel } from "./CommandPanel";
 import type { RuntimeState, OutputLine } from "@/lib/workspace/runtime";
+import type { CommandResult } from "@/lib/workspace/command-controller";
 
-type PanelTab = "terminal" | "output" | "preview";
+type PanelTab = "terminal" | "output" | "preview" | "commands";
 
 interface RuntimePanelProps {
   /** Output lines from the runtime process. */
@@ -44,6 +46,16 @@ interface RuntimePanelProps {
   onStop: () => void;
   /** Called when Refresh is clicked. */
   onRefresh: () => void;
+  /** Command results from the command controller. */
+  commands: CommandResult[];
+  /** Whether any command is running. */
+  commandsRunning: boolean;
+  /** Run a structured command. */
+  onCommandRun: (input: string) => Promise<void>;
+  /** Cancel a command by ID. */
+  onCommandCancel: (processId: string) => void;
+  /** Clear completed commands. */
+  onCommandClear: () => void;
 }
 
 export function RuntimePanel({
@@ -56,6 +68,11 @@ export function RuntimePanel({
   onRun,
   onStop,
   onRefresh,
+  commands,
+  commandsRunning,
+  onCommandRun,
+  onCommandCancel,
+  onCommandClear,
 }: RuntimePanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>("preview");
 
@@ -84,6 +101,16 @@ export function RuntimePanel({
           Output
         </button>
         <button
+          onClick={() => setActiveTab("commands")}
+          className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeTab === "commands"
+              ? "text-gray-200 border-b-2 border-cyan-500"
+              : "text-gray-500 hover:text-gray-400"
+          }`}
+        >
+          Commands
+        </button>
+        <button
           onClick={() => setActiveTab("preview")}
           className={`px-3 py-1.5 text-xs font-medium transition-colors ${
             activeTab === "preview"
@@ -106,6 +133,15 @@ export function RuntimePanel({
         )}
         {activeTab === "output" && (
           <OutputPanel output={output} />
+        )}
+        {activeTab === "commands" && (
+          <CommandPanel
+            commands={commands}
+            isRunning={commandsRunning}
+            onRun={onCommandRun}
+            onCancel={onCommandCancel}
+            onClear={onCommandClear}
+          />
         )}
         {activeTab === "preview" && (
           <PreviewPanel

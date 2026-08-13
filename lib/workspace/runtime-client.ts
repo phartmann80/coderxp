@@ -5,6 +5,15 @@
  * timeout. On timeout, the promise rejects with a clear error so callers
  * can surface a retry UI instead of hanging at "mounting" forever.
  *
+ * M3.2: boot ownership hardening. The original Promise.race() timeout did
+ * not cancel the underlying WebContainer.boot() attempt. If the timeout
+ * fired and the user hit Retry, a second boot() could compete with the
+ * first. Now, a bootAttemptId token guards against duplicate boot calls:
+ * if a boot is in progress, callers receive the same promise. If the boot
+ * timed out or failed, the pending promise is fully cleared before a retry
+ * is allowed, and the bootAttemptId is incremented so any late resolution
+ * from the stale boot is ignored.
+ *
  * Binding corrections applied:
  * - COEP mode: require-corp (not credentialless)
  * - Project root: WORKSPACE_PROJECT_ROOT ("project")
@@ -30,6 +39,12 @@ let bootPromise: Promise<WebContainer> | null = null;
 let bootTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
+ * Monotonic boot attempt ID. Incremented on each new boot attempt.
+ * Used to detect and ignore late resolutions from a stale (timed-out) boot.
+ */
+let bootAttemptId = 0;
+
+/**
  * Boots the WebContainer singleton if not already booted.
  *
  * Uses the binding boot options: coep require-corp,
@@ -38,6 +53,12 @@ let bootTimer: ReturnType<typeof setTimeout> | null = null;
  * M3.1: A configurable boot timeout (default 15s) prevents the boot
  * from hanging indefinitely. On timeout, the promise rejects with a
  * clear error so callers can surface a retry UI.
+ *
+ * M3.2: Boot ownership hardening. A bootAttemptId token ensures that
+ * if a boot times out and the underlying WebContainer.boot() later
+ * resolves, that late resolution is ignored. A retry increments the
+ * attempt ID, so the stale boot's resolution cannot set state.
+ * This prevents competing/duplicate boot attempts.
  *
  * On failure, clears the pending promise and resets state so
  * a later retry is possible. Does not create multiple boot
@@ -55,6 +76,10 @@ export async function bootWebContainer(timeoutMs: number = 15000): Promise<WebCo
     return bootPromise;
   }
 
+  // Assign a new attempt ID for this boot. Any late resolution from
+  // a previous (timed-out) boot will have a stale attempt ID and be ignored.
+  const attemptId = ++bootAttemptId;
+
   // Race the boot against a timeout.
   const timeoutPromise = new Promise<never>((_, reject) => {
     bootTimer = setTimeout(() => {
@@ -67,6 +92,12 @@ export async function bootWebContainer(timeoutMs: number = 15000): Promise<WebCo
     timeoutPromise,
   ])
     .then((instance) => {
+      // Ignore late resolutions from a stale (timed-out) boot attempt.
+      if (attemptId !== bootAttemptId) {
+        // A newer boot attempt has started. Discard this result.
+        return webContainerInstance ?? (instance as WebContainer);
+      }
+
       if (bootTimer) {
         clearTimeout(bootTimer);
         bootTimer = null;
@@ -76,16 +107,23 @@ export async function bootWebContainer(timeoutMs: number = 15000): Promise<WebCo
       return webContainerInstance;
     })
     .catch((error: unknown) => {
-      if (bootTimer) {
-        clearTimeout(bootTimer);
-        bootTimer = null;
+      // Only process the error if this is still the current attempt.
+      if (attemptId === bootAttemptId) {
+        if (bootTimer) {
+          clearTimeout(bootTimer);
+          bootTimer = null;
+        }
+        webContainerInstance = null;
+        booted = false;
       }
-      webContainerInstance = null;
-      booted = false;
       throw error;
     })
     .finally(() => {
-      bootPromise = null;
+      // Only clear the promise if this is still the current attempt.
+      // A newer attempt has its own promise.
+      if (attemptId === bootAttemptId) {
+        bootPromise = null;
+      }
     });
 
   return bootPromise;
@@ -102,6 +140,9 @@ export async function bootWebContainer(timeoutMs: number = 15000): Promise<WebCo
  * Do NOT call this during ordinary project switching.
  */
 export function teardownWebContainer(): void {
+  // Increment attempt ID so any in-flight boot resolution is ignored.
+  bootAttemptId++;
+
   if (webContainerInstance) {
     webContainerInstance.teardown();
     webContainerInstance = null;

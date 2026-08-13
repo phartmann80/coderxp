@@ -32,7 +32,9 @@ import { EditorPanel } from "./EditorPanel";
 import { RuntimePanel } from "./RuntimePanel";
 import { TerminalPanel } from "./TerminalPanel";
 import { useRuntime } from "../hooks/useRuntime";
+import { useCommands } from "../hooks/useCommands";
 import { getTerminal } from "@/lib/workspace/terminal";
+import { getCommandController } from "@/lib/workspace/command-controller";
 import {
   putEntry,
   renameEntry,
@@ -127,6 +129,31 @@ export function ProjectShell({
   const runtime = useRuntime(project.id, files, async () => {
     return flushAllRef.current ? flushAllRef.current() : Promise.resolve(true);
   }, project.templateId);
+
+  const commands = useCommands();
+
+  // Handle running a command from the CommandPanel.
+  const handleCommandRun = async (input: string) => {
+    // Flush editor buffers before running a command that depends on source.
+    const ok = flushAllRef.current ? await flushAllRef.current() : true;
+    if (!ok) return;
+
+    // Sync project files into WebContainer if already mounted.
+    if (runtime.state !== "idle" || runtime.isRunning) {
+      // Runtime is active — project is already mounted.
+    }
+
+    // Parse the command string into command + args.
+    const parts = input.trim().split(/\s+/);
+    const cmd = parts[0];
+    const args = parts.slice(1);
+
+    await commands.runCommand({
+      command: cmd,
+      args,
+      owner: "user",
+    });
+  };
 
   // Close rename mode and sync the displayed name when rename succeeds.
   const [lastSeenRenameVersion, setLastSeenRenameVersion] = useState(renameSuccessVersion);
@@ -590,6 +617,11 @@ export function ProjectShell({
               onRun={runtime.run}
               onStop={runtime.stop}
               onRefresh={runtime.refreshPreview}
+              commands={commands.commands}
+              commandsRunning={commands.isRunning}
+              onCommandRun={handleCommandRun}
+              onCommandCancel={commands.cancelCommand}
+              onCommandClear={commands.clearCompleted}
             />
           </div>
         </div>

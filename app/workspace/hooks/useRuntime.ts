@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getRuntime, getRuntimeKind, type RuntimeState, type RuntimeKind, type OutputLine } from "@/lib/workspace/runtime";
 import { getTerminal } from "@/lib/workspace/terminal";
+import { getCommandController } from "@/lib/workspace/command-controller";
 import { listProjectEntries } from "@/lib/workspace/persistence";
 import type { WorkspaceFileRecord } from "@/lib/workspace/types";
 
@@ -55,6 +56,9 @@ export interface RuntimeApi {
 
   /** Switch to a new project (stop old, remount new). */
   switchProject: (files: WorkspaceFileRecord[]) => Promise<void>;
+
+  /** Invalidate all commands for the current project (project switch). */
+  invalidateCommands: () => void;
 }
 
 export function useRuntime(
@@ -157,6 +161,10 @@ export function useRuntime(
     } else {
       await runtimeRef.current.mountProject(freshFiles, kind);
     }
+
+    // Mark the command controller as mounted so commands can run.
+    getCommandController().setMounted(true);
+
     await runtimeRef.current.run();
   }, [flushAll, projectId, templateId]);
 
@@ -184,9 +192,21 @@ export function useRuntime(
     const terminal = getTerminal();
     await terminal.reset();
 
+    // Invalidate all commands from the old project.
+    const cmdController = getCommandController();
+    cmdController.invalidateProject();
+    cmdController.clearHistory();
+
     const kind = getRuntimeKind(templateId ?? "static-html");
     await runtimeRef.current.switchProject(newFiles, kind);
+    cmdController.setMounted(true);
   }, [templateId]);
+
+  const invalidateCommands = useCallback(() => {
+    const cmdController = getCommandController();
+    cmdController.invalidateProject();
+    cmdController.clearHistory();
+  }, []);
 
   return {
     state,
@@ -200,6 +220,7 @@ export function useRuntime(
     stop,
     refreshPreview,
     clearError,
+    invalidateCommands,
     switchProject,
   };
 }

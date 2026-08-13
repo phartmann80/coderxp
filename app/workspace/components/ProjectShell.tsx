@@ -23,6 +23,7 @@ import {
   X,
   FilePlus,
   FolderPlus,
+  Download,
 } from "lucide-react";
 import type { WorkspaceProject, WorkspaceFileRecord } from "@/lib/workspace/types";
 import { buildFileTree } from "@/lib/workspace/project-tree";
@@ -37,6 +38,7 @@ import {
 } from "@/lib/workspace/persistence";
 import { isPersistenceError, type PersistenceErrorCode } from "@/lib/workspace/types";
 import { getEntryName } from "@/lib/workspace/path-utils";
+import { exportProjectZip } from "@/lib/workspace/export";
 import type { FileOpenRequest } from "@/app/workspace/hooks/useEditorPersistence";
 
 interface ProjectShellProps {
@@ -112,6 +114,10 @@ export function ProjectShell({
   // Entry delete confirmation.
   const [entryToDelete, setEntryToDelete] = useState<string | null>(null);
   const [entryDeleteInProgress, setEntryDeleteInProgress] = useState(false);
+
+  // Export state.
+  const [exportState, setExportState] = useState<"idle" | "exporting" | "error">("idle");
+  const [exportError, setExportError] = useState<string | null>(null);
 
   // Ref to hold the flushAll function from EditorPanel's persistence hook.
   const flushAllRef = useRef<(() => Promise<boolean>) | null>(null);
@@ -307,6 +313,30 @@ export function ProjectShell({
   };
 
   // -------------------------------------------------------------------------
+  // Export
+  // -------------------------------------------------------------------------
+
+  const handleExport = useCallback(async () => {
+    if (exportState === "exporting") return;
+    setExportState("exporting");
+    setExportError(null);
+
+    try {
+      const flushFn = flushAllRef.current ?? (() => Promise.resolve(true));
+      const result = await exportProjectZip(project.id, project.name, flushFn);
+      if (result.ok) {
+        setExportState("idle");
+      } else {
+        setExportState("error");
+        setExportError(result.error);
+      }
+    } catch {
+      setExportState("error");
+      setExportError("Export failed unexpectedly.");
+    }
+  }, [exportState, project.id, project.name]);
+
+  // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
 
@@ -378,6 +408,16 @@ export function ProjectShell({
           >
             <Trash2 className="w-3.5 h-3.5" />
             Delete
+          </button>
+          <button
+            onClick={handleExport}
+            disabled={exportState === "exporting" || projectOperationPending}
+            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Export ZIP"
+            title="Export project as ZIP"
+          >
+            <Download className="w-3.5 h-3.5" />
+            {exportState === "exporting" ? "Exporting..." : "Export"}
           </button>
         </div>
       </div>
@@ -552,6 +592,22 @@ export function ProjectShell({
           </div>
         </div>
       </div>
+
+      {/* Export error banner */}
+      {exportState === "error" && exportError && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-red-950/50 border-b border-red-800/50 text-red-300 text-xs">
+          <span className="flex-1">Export failed: {exportError}</span>
+          <button
+            onClick={() => {
+              setExportState("idle");
+              setExportError(null);
+            }}
+            className="px-2 py-0.5 rounded bg-red-800/50 hover:bg-red-800/70 text-red-200 transition-colors"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Entry delete confirmation modal */}
       {entryToDelete && (

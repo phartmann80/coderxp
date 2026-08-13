@@ -3,21 +3,16 @@
 /**
  * Open-project shell for CoderXP M2 Workspace Alpha.
  *
- * Final correction scope:
- * - Rename mode closes only after successful rename.
- * - Rename text remains available after failure.
- * - Delete confirmation closes only after successful deletion.
- * - Selected-file summary shows the actual stored kind (file/directory).
- * - Accepts projectOperationPending to disable Back, Rename, Delete, Cancel
- *   while any cross-operation is pending (rename, delete, retry, opening).
- * - Rename input and Cancel are disabled while the rename transaction is pending.
- * - Delete-confirmation Cancel is disabled while deletion is pending.
- * - Opening another project is disabled while any operation is pending.
+ * Commit 6 scope: adds file & folder management (create, rename, delete)
+ * with dirty-file protection, toolbar controls, and inline tree rename.
  *
- * Commit 5: adds runtime panel (Output + Preview) below the editor.
- * - Real WebContainer process, real stdout/stderr, real server-ready URL.
- * - Run flushes all dirty editor buffers before starting.
- * - Generation-based process ownership prevents stale runs.
+ * - New File / New Folder / Rename / Delete toolbar in the Files panel.
+ * - Uses existing IndexedDB persistence operations (putEntry, renameEntry, deleteEntry).
+ * - Dirty editor protection: flushes before rename/delete on dirty files.
+ * - After create/rename/delete, refreshes authoritative project entries.
+ * - Editor tabs and active-file state follow renamed paths.
+ * - Never leaves the editor showing a file that no longer exists.
+ * - No automatic Run after filesystem operations.
  */
 
 import { useMemo, useState, useCallback, useRef } from "react";
@@ -26,6 +21,8 @@ import {
   Pencil,
   Trash2,
   X,
+  FilePlus,
+  FolderPlus,
 } from "lucide-react";
 import type { WorkspaceProject, WorkspaceFileRecord } from "@/lib/workspace/types";
 import { buildFileTree } from "@/lib/workspace/project-tree";
@@ -33,6 +30,15 @@ import { FileTree } from "./FileTree";
 import { EditorPanel } from "./EditorPanel";
 import { RuntimePanel } from "./RuntimePanel";
 import { useRuntime } from "../hooks/useRuntime";
+import {
+  putEntry,
+  renameEntry,
+  deleteEntry,
+  listProjectEntries,
+  getProject,
+} from "@/lib/workspace/persistence";
+import { isPersistenceError, type PersistenceErrorCode } from "@/lib/workspace/types";
+import { getEntryName, getParentPath } from "@/lib/workspace/path-utils";
 import type { FileOpenRequest } from "@/app/workspace/hooks/useEditorPersistence";
 
 interface ProjectShellProps {
@@ -42,10 +48,38 @@ interface ProjectShellProps {
   deleting: boolean;
   projectOperationPending: boolean;
   renameSuccessVersion: number;
+  /** Increments when the workspace state hook refreshes files. */
+  fileOperationVersion: number;
   onBack: () => void;
   onRename: (newName: string) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
   onProjectUpdate: (updated: WorkspaceProject) => void;
+  /** Called to trigger a file-list refresh in the parent. */
+  onRefreshFiles: () => void;
+}
+
+/** Controlled error messages for file operations. */
+const FILE_ERROR_MESSAGES: Record<PersistenceErrorCode, string> = {
+  PERSISTENCE_UNAVAILABLE: "Local storage is not available.",
+  DATABASE_OPEN_FAILED: "The local database could not be opened.",
+  QUOTA_EXCEEDED: "Storage quota exceeded. Remove unused projects to free space.",
+  TRANSACTION_FAILED: "The operation failed. Please try again.",
+  PROJECT_NOT_FOUND: "The project was not found.",
+  ENTRY_NOT_FOUND: "The file or folder was not found.",
+  ENTRY_CONFLICT: "A file or folder with that path already exists.",
+  REVISION_CONFLICT: "The project was modified by another operation. Please refresh.",
+  INVALID_PROJECT_NAME: "The project name is invalid.",
+  INVALID_PATH: "The path is invalid.",
+  INVALID_ENTRY: "The entry is invalid.",
+  TEMPLATE_UNAVAILABLE: "This template is not available.",
+};
+
+function getFileErrorMessage(err: unknown): string {
+  if (isPersistenceError(err)) {
+    const code = (err as { code: PersistenceErrorCode }).code;
+    return FILE_ERROR_MESSAGES[code] ?? "The operation failed.";
+  }
+  return "The operation failed.";
 }
 
 export function ProjectShell({
@@ -55,10 +89,12 @@ export function ProjectShell({
   deleting,
   projectOperationPending,
   renameSuccessVersion,
+  fileOperationVersion,
   onBack,
   onRename,
   onDelete,
   onProjectUpdate,
+  onRefreshFiles,
 }: ProjectShellProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(project.activeFile);
   const [fileOpenRequest, setFileOpenRequest] = useState<FileOpenRequest | null>(null);
@@ -67,19 +103,30 @@ export function ProjectShell({
   const [renameValue, setRenameValue] = useState(project.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // File operation state.
+  const [newFileMode, setNewFileMode] = useState(false);
+  const [newFileValue, setNewFileValue] = useState("");
+  const [newFolderMode, setNewFolderMode] = useState(false);
+  const [newFolderValue, setNewFolderValue] = useState("");
+  const [fileOpError, setFileOpError] = useState<string | null>(null);
+  const [fileOpInProgress, setFileOpInProgress] = useState(false);
+
+  // Entry delete confirmation.
+  const [entryToDelete, setEntryToDelete] = useState<string | null>(null);
+  const [entryDeleteInProgress, setEntryDeleteInProgress] = useState(false);
+
   // Ref to hold the flushAll function from EditorPanel's persistence hook.
-  // This lets the runtime flush dirty buffers before starting a Run.
   const flushAllRef = useRef<(() => Promise<boolean>) | null>(null);
+  // Ref to hold the flushPath function for dirty-file protection.
+  const flushPathRef = useRef<((path: string) => Promise<boolean>) | null>(null);
+  // Ref to hold the clearFile function for tab cleanup after delete.
+  const clearFileRef = useRef<((path: string) => void) | null>(null);
 
   const runtime = useRuntime(project.id, files, async () => {
     return flushAllRef.current ? flushAllRef.current() : Promise.resolve(true);
   });
 
-  // Close rename mode and sync the displayed name when rename succeeds
-  // (including on retry). Uses the monotonic renameSuccessVersion token
-  // so we detect success without matching project names.
-  // Adjusting state during render is the React-recommended pattern for
-  // syncing local state to a changing prop/external signal.
+  // Close rename mode and sync the displayed name when rename succeeds.
   const [lastSeenRenameVersion, setLastSeenRenameVersion] = useState(renameSuccessVersion);
   if (renameSuccessVersion !== lastSeenRenameVersion) {
     setLastSeenRenameVersion(renameSuccessVersion);
@@ -92,32 +139,208 @@ export function ProjectShell({
   const handleRenameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (renameValue.trim().length === 0 || renaming || projectOperationPending) return;
-
-    // Rename mode is closed by the renameSuccessVersion effect after
-    // successful rename. On failure, rename mode stays open and the
-    // rename text is preserved.
     await onRename(renameValue);
   };
 
   const handleDeleteConfirm = async () => {
     if (projectOperationPending) return;
-    // Close delete confirmation only after successful deletion.
     const success = await onDelete();
     if (success) {
       setConfirmDelete(false);
     }
-    // On failure, the confirmation modal stays open with the project context.
   };
 
   const handleFileSelect = useCallback((path: string) => {
     setSelectedPath(path);
-    // Only open files (not directories) in the editor.
     const record = files.find((f) => f.path === path);
     if (record && record.kind === "file") {
       fileOpenCounterRef.current++;
       setFileOpenRequest({ path, requestId: fileOpenCounterRef.current });
     }
   }, [files]);
+
+  // -------------------------------------------------------------------------
+  // File & folder management
+  // -------------------------------------------------------------------------
+
+  /** Refresh the authoritative project entries and update workspace state. */
+  const refreshProjectFiles = useCallback(async (): Promise<void> => {
+    onRefreshFiles();
+  }, [onRefreshFiles]);
+
+  /** Open a file in the editor and make it active. */
+  const openFileInEditor = useCallback((path: string) => {
+    setSelectedPath(path);
+    fileOpenCounterRef.current++;
+    setFileOpenRequest({ path, requestId: fileOpenCounterRef.current });
+  }, []);
+
+  // --- New File ---
+
+  const handleNewFileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newFileValue.trim();
+    if (trimmed.length === 0 || fileOpInProgress) return;
+
+    setFileOpInProgress(true);
+    setFileOpError(null);
+
+    try {
+      await putEntry(project.id, trimmed, "file", "");
+      await refreshProjectFiles();
+
+      // Open the new file in the editor.
+      openFileInEditor(trimmed);
+
+      setNewFileMode(false);
+      setNewFileValue("");
+    } catch (err) {
+      setFileOpError(getFileErrorMessage(err));
+    } finally {
+      setFileOpInProgress(false);
+    }
+  };
+
+  // --- New Folder ---
+
+  const handleNewFolderSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newFolderValue.trim();
+    if (trimmed.length === 0 || fileOpInProgress) return;
+
+    // Folder paths should end with a trailing slash for the persistence layer.
+    // The path validator rejects trailing "/", so we strip it before putEntry.
+    const folderPath = trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+
+    setFileOpInProgress(true);
+    setFileOpError(null);
+
+    try {
+      await putEntry(project.id, folderPath, "directory");
+      await refreshProjectFiles();
+
+      setNewFolderMode(false);
+      setNewFolderValue("");
+    } catch (err) {
+      setFileOpError(getFileErrorMessage(err));
+    } finally {
+      setFileOpInProgress(false);
+    }
+  };
+
+  // --- Rename Entry (from FileTree inline) ---
+
+  const handleEntryRename = useCallback(
+    async (oldPath: string, newPath: string): Promise<boolean> => {
+      if (fileOpInProgress) return false;
+      setFileOpInProgress(true);
+      setFileOpError(null);
+
+      try {
+        // Dirty-file protection: if the renamed entry is a file and it's dirty,
+        // flush it first. If flush fails, abort the rename.
+        const entry = files.find((f) => f.path === oldPath);
+        if (entry && entry.kind === "file" && flushPathRef.current) {
+          const flushOk = await flushPathRef.current(oldPath);
+          if (!flushOk) {
+            setFileOpError("Could not save the file before renaming. Your changes are preserved.");
+            return false;
+          }
+        }
+
+        // Also flush any dirty descendant files if renaming a directory.
+        if (entry && entry.kind === "directory" && flushAllRef.current) {
+          const flushOk = await flushAllRef.current();
+          if (!flushOk) {
+            setFileOpError("Could not save all files before renaming. Your changes are preserved.");
+            return false;
+          }
+        }
+
+        await renameEntry(project.id, oldPath, newPath);
+        await refreshProjectFiles();
+
+        // Update selected path if the renamed entry was selected.
+        if (selectedPath === oldPath) {
+          setSelectedPath(newPath);
+        }
+
+        return true;
+      } catch (err) {
+        setFileOpError(getFileErrorMessage(err));
+        return false;
+      } finally {
+        setFileOpInProgress(false);
+      }
+    },
+    [fileOpInProgress, files, project.id, selectedPath, refreshProjectFiles],
+  );
+
+  // --- Delete Entry (from FileTree or toolbar) ---
+
+  const handleEntryDeleteRequest = useCallback((path: string) => {
+    setEntryToDelete(path);
+    setFileOpError(null);
+  }, []);
+
+  const handleEntryDeleteConfirm = async () => {
+    if (!entryToDelete || entryDeleteInProgress) return;
+
+    setEntryDeleteInProgress(true);
+    setFileOpError(null);
+
+    try {
+      // Dirty-file protection: flush the file if it's dirty before deleting.
+      const entry = files.find((f) => f.path === entryToDelete);
+      if (entry && entry.kind === "file" && flushPathRef.current) {
+        const flushOk = await flushPathRef.current(entryToDelete);
+        if (!flushOk) {
+          setFileOpError("Could not save the file before deleting. Your changes are preserved.");
+          return;
+        }
+      }
+
+      // Also flush all dirty files if deleting a directory (descendants may be dirty).
+      if (entry && entry.kind === "directory" && flushAllRef.current) {
+        const flushOk = await flushAllRef.current();
+        if (!flushOk) {
+          setFileOpError("Could not save all files before deleting. Your changes are preserved.");
+          return;
+        }
+      }
+
+      await deleteEntry(project.id, entryToDelete);
+      await refreshProjectFiles();
+
+      // Clear the deleted file from the editor if it was open.
+      if (clearFileRef.current) {
+        clearFileRef.current(entryToDelete);
+      }
+
+      // If the deleted entry was the selected path, pick a sensible survivor.
+      if (selectedPath === entryToDelete) {
+        // Try to find a surviving file to select.
+        const remainingFiles = files.filter(
+          (f) => f.kind === "file" && f.path !== entryToDelete,
+        );
+        if (remainingFiles.length > 0) {
+          setSelectedPath(remainingFiles[0].path);
+        } else {
+          setSelectedPath(null);
+        }
+      }
+
+      setEntryToDelete(null);
+    } catch (err) {
+      setFileOpError(getFileErrorMessage(err));
+    } finally {
+      setEntryDeleteInProgress(false);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -194,19 +417,141 @@ export function ProjectShell({
       {/* Main content: file tree + file summary */}
       <div className="flex flex-1 overflow-hidden">
         {/* File tree sidebar */}
-        <div className="w-64 border-r border-gray-800 bg-gray-900/30 overflow-y-auto p-2">
-          <div className="text-xs text-gray-600 uppercase tracking-wide px-2 py-1.5 mb-1">
-            Files
+        <div className="w-64 border-r border-gray-800 bg-gray-900/30 overflow-y-auto p-2 flex flex-col">
+          <div className="flex items-center justify-between px-2 py-1.5 mb-1">
+            <span className="text-xs text-gray-600 uppercase tracking-wide">Files</span>
+            {/* Toolbar: New File, New Folder */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => {
+                  setNewFileMode(true);
+                  setNewFileValue("");
+                  setNewFolderMode(false);
+                  setFileOpError(null);
+                }}
+                disabled={fileOpInProgress || projectOperationPending}
+                className="p-1 text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label="New File"
+                title="New File"
+              >
+                <FilePlus className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => {
+                  setNewFolderMode(true);
+                  setNewFolderValue("");
+                  setNewFileMode(false);
+                  setFileOpError(null);
+                }}
+                disabled={fileOpInProgress || projectOperationPending}
+                className="p-1 text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label="New Folder"
+                title="New Folder"
+              >
+                <FolderPlus className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
-          {tree.length === 0 ? (
-            <p className="text-xs text-gray-600 italic px-2 py-1">No files in this project.</p>
-          ) : (
-            <FileTreeWrapper
-              nodes={tree}
-              selectedPath={selectedPath}
-              onSelect={handleFileSelect}
-            />
+
+          {/* New file input */}
+          {newFileMode && (
+            <form onSubmit={handleNewFileSubmit} className="px-2 py-1">
+              <input
+                type="text"
+                value={newFileValue}
+                onChange={(e) => setNewFileValue(e.target.value)}
+                placeholder="path/to/file.html"
+                maxLength={1024}
+                autoFocus
+                disabled={fileOpInProgress}
+                className="w-full px-2 py-1 text-xs text-gray-100 bg-gray-800 border border-gray-600 rounded focus:outline-none focus:border-cyan-600 disabled:opacity-50"
+              />
+              <div className="flex items-center gap-2 mt-1">
+                <button
+                  type="submit"
+                  disabled={fileOpInProgress || newFileValue.trim().length === 0}
+                  className="text-xs text-cyan-500 hover:text-cyan-400 disabled:opacity-50"
+                >
+                  {fileOpInProgress ? "Creating..." : "Create"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewFileMode(false);
+                    setNewFileValue("");
+                  }}
+                  disabled={fileOpInProgress}
+                  className="text-xs text-gray-500 hover:text-gray-400 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
           )}
+
+          {/* New folder input */}
+          {newFolderMode && (
+            <form onSubmit={handleNewFolderSubmit} className="px-2 py-1">
+              <input
+                type="text"
+                value={newFolderValue}
+                onChange={(e) => setNewFolderValue(e.target.value)}
+                placeholder="folder/name"
+                maxLength={1024}
+                autoFocus
+                disabled={fileOpInProgress}
+                className="w-full px-2 py-1 text-xs text-gray-100 bg-gray-800 border border-gray-600 rounded focus:outline-none focus:border-cyan-600 disabled:opacity-50"
+              />
+              <div className="flex items-center gap-2 mt-1">
+                <button
+                  type="submit"
+                  disabled={fileOpInProgress || newFolderValue.trim().length === 0}
+                  className="text-xs text-cyan-500 hover:text-cyan-400 disabled:opacity-50"
+                >
+                  {fileOpInProgress ? "Creating..." : "Create"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewFolderMode(false);
+                    setNewFolderValue("");
+                  }}
+                  disabled={fileOpInProgress}
+                  className="text-xs text-gray-500 hover:text-gray-400 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* File operation error */}
+          {fileOpError && (
+            <div className="flex items-center gap-1.5 px-2 py-1.5 mt-1 bg-red-950/50 border border-red-800/50 rounded text-red-300 text-xs">
+              <span className="flex-1">{fileOpError}</span>
+              <button
+                onClick={() => setFileOpError(null)}
+                className="px-1 py-0.5 rounded bg-red-800/50 hover:bg-red-800/70 text-red-200 transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
+          {/* File tree */}
+          <div className="flex-1 overflow-y-auto">
+            {tree.length === 0 ? (
+              <p className="text-xs text-gray-600 italic px-2 py-1">No files in this project.</p>
+            ) : (
+              <FileTreeWrapper
+                nodes={tree}
+                selectedPath={selectedPath}
+                onSelect={handleFileSelect}
+                onRename={handleEntryRename}
+                onDelete={handleEntryDeleteRequest}
+              />
+            )}
+          </div>
         </div>
 
         {/* Editor + Runtime panel (editor on top, runtime below) */}
@@ -221,6 +566,8 @@ export function ProjectShell({
               onBack={onBack}
               projectOperationPending={projectOperationPending}
               flushAllRef={flushAllRef}
+              flushPathRef={flushPathRef}
+              clearFileRef={clearFileRef}
             />
           </div>
           {/* Runtime panel: Output + Preview */}
@@ -240,7 +587,43 @@ export function ProjectShell({
         </div>
       </div>
 
-      {/* Delete confirmation modal */}
+      {/* Entry delete confirmation modal */}
+      {entryToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="max-w-sm w-full mx-4 p-6 bg-gray-900 border border-gray-700 rounded-lg space-y-4">
+            <div className="flex items-center gap-2 text-red-400">
+              <Trash2 className="w-5 h-5" />
+              <h3 className="text-sm font-semibold">Delete {getEntryName(entryToDelete)}</h3>
+            </div>
+            <p className="text-sm text-gray-400">
+              Are you sure you want to delete{" "}
+              <span className="text-gray-100 font-mono">{entryToDelete}</span>?
+              {files.find((f) => f.path === entryToDelete)?.kind === "directory" &&
+                " All contents inside this folder will be removed."}
+              {" This action cannot be undone."}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setEntryToDelete(null)}
+                disabled={entryDeleteInProgress}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <X className="w-3.5 h-3.5" />
+                Cancel
+              </button>
+              <button
+                onClick={handleEntryDeleteConfirm}
+                disabled={entryDeleteInProgress}
+                className="px-3 py-1.5 text-sm text-white bg-red-700 rounded-md hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {entryDeleteInProgress ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Project delete confirmation modal */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="max-w-sm w-full mx-4 p-6 bg-gray-900 border border-gray-700 rounded-lg space-y-4">
@@ -249,7 +632,8 @@ export function ProjectShell({
               <h3 className="text-sm font-semibold">Delete project</h3>
             </div>
             <p className="text-sm text-gray-400">
-              Are you sure you want to delete <span className="text-gray-100 font-medium">{project.name}</span>?
+              Are you sure you want to delete{" "}
+              <span className="text-gray-100 font-medium">{project.name}</span>?
               This action cannot be undone.
             </p>
             <div className="flex justify-end gap-2">
@@ -281,10 +665,22 @@ function FileTreeWrapper({
   nodes,
   selectedPath,
   onSelect,
+  onRename,
+  onDelete,
 }: {
   nodes: ReturnType<typeof buildFileTree>;
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  onRename: (oldPath: string, newPath: string) => Promise<boolean>;
+  onDelete: (path: string) => void;
 }) {
-  return <FileTree nodes={nodes} selectedPath={selectedPath} onSelect={onSelect} />;
+  return (
+    <FileTree
+      nodes={nodes}
+      selectedPath={selectedPath}
+      onSelect={onSelect}
+      onRename={onRename}
+      onDelete={onDelete}
+    />
+  );
 }

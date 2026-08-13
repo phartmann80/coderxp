@@ -48,6 +48,7 @@ import {
   deleteProject,
   listProjectEntries,
 } from "@/lib/workspace/persistence";
+
 import {
   getPersistenceErrorCode,
   type PersistenceErrorCode,
@@ -136,6 +137,7 @@ export function useWorkspaceState() {
   const [retryAction, setRetryAction] = useState<RetryAction | null>(null);
   const [creationSuccessVersion, setCreationSuccessVersion] = useState(0);
   const [renameSuccessVersion, setRenameSuccessVersion] = useState(0);
+  const [fileOperationVersion, setFileOperationVersion] = useState(0);
 
   const mountedRef = useRef(true);
   const openGenerationRef = useRef(0);
@@ -873,6 +875,24 @@ export function useWorkspaceState() {
     [replaceProjectInState],
   );
 
+  const refreshActiveProjectFiles = useCallback(
+    async (projectId: string): Promise<void> => {
+      try {
+        const updatedFiles = await listProjectEntries(projectId);
+        const updatedProject = await getProject(projectId);
+        if (mountedRef.current) {
+          setActiveProjectFiles(updatedFiles);
+          setActiveProject(updatedProject);
+          replaceProjectInState(updatedProject);
+          setFileOperationVersion((v) => v + 1);
+        }
+      } catch {
+        // Silently fail — the calling operation surfaces its own error.
+      }
+    },
+    [replaceProjectInState],
+  );
+
   return {
     view,
     projects,
@@ -896,5 +916,7 @@ export function useWorkspaceState() {
     retry,
     dismissError,
     openProjectById: handleOpenProject,
+    refreshActiveProjectFiles,
+    fileOperationVersion,
   };
 }

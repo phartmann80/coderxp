@@ -38,6 +38,8 @@ export default function WorkspaceShell() {
     retry,
     dismissError,
     openProjectById,
+    refreshActiveProjectFiles,
+    fileOperationVersion,
   } = useWorkspaceState();
 
   const projectOperationPending =
@@ -100,10 +102,12 @@ export default function WorkspaceShell() {
             deleting={deleting}
             projectOperationPending={projectOperationPending}
             renameSuccessVersion={renameSuccessVersion}
+            fileOperationVersion={fileOperationVersion}
             onBack={backToLauncher}
             onRename={(newName) => handleRenameProject(activeProject.id, newName)}
             onDelete={() => handleDeleteProject(activeProject.id)}
             onProjectUpdate={handleProjectUpdate}
+            onRefreshFiles={() => refreshActiveProjectFiles(activeProject.id)}
           />
         </div>
       )}

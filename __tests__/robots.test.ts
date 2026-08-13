@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
-import robots from "@/app/robots";
+import robotsFn from "@/app/robots";
 
 describe("robots.ts — dynamic robots route", () => {
+  const robots = robotsFn();
+
   it("should allow all user agents", () => {
     expect(robots.rules.userAgent).toBe("*");
     expect(robots.rules.allow).toBe("/");

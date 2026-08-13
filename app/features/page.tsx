@@ -25,7 +25,7 @@ export default function FeaturesPage() {
       title: "3-Panel Signature Workspace",
       desc: "Adaptable three-panel layout featuring context history on the left, syntax-highlighted editor in center, and live preview runner on the right.",
       icon: Layers,
-      capabilityStatus: "Milestone 4 (Planned)",
+      capabilityStatus: "Milestone 2 (In Progress)",
     },
     {
       title: "AST Code Diffing & Review",
@@ -37,7 +37,7 @@ export default function FeaturesPage() {
       title: "Interactive Sandbox Live Preview",
       desc: "Every project renders inside an isolated live preview runner supporting desktop, tablet, and mobile viewports.",
       icon: Eye,
-      capabilityStatus: "Milestone 4 (Planned)",
+      capabilityStatus: "Milestone 2 (In Progress)",
     },
   ];
 
@@ -62,7 +62,7 @@ export default function FeaturesPage() {
           return (
             <div key={f.title} className="p-6 rounded-xl glass-panel space-y-4 flex flex-col justify-between">
               <div className="space-y-3">
-                <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify-center text-accent-cyan">
+                <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify text-accent-cyan">
                   <Icon className="w-5 h-5" />
                 </div>
                 <h3 className="text-base font-semibold text-white">{f.title}</h3>

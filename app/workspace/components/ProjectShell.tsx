@@ -124,7 +124,7 @@ export function ProjectShell({
 
   const runtime = useRuntime(project.id, files, async () => {
     return flushAllRef.current ? flushAllRef.current() : Promise.resolve(true);
-  });
+  }, project.templateId);
 
   // Close rename mode and sync the displayed name when rename succeeds.
   const [lastSeenRenameVersion, setLastSeenRenameVersion] = useState(renameSuccessVersion);

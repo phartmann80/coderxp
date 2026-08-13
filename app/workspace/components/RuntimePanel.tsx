@@ -113,6 +113,7 @@ function RuntimeStatusIndicator({ state }: { state: RuntimeState }) {
     booting: "text-amber-400",
     mounting: "text-amber-400",
     starting: "text-amber-400",
+    installing: "text-amber-400",
     running: "text-green-400",
     stopping: "text-gray-500",
     error: "text-red-400",

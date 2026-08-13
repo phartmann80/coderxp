@@ -32,6 +32,7 @@ export type RuntimeState =
   | "idle"
   | "booting"
   | "mounting"
+  | "installing"
   | "starting"
   | "running"
   | "stopping"
@@ -58,6 +59,13 @@ export type PreviewUrlCallback = (url: string | null) => void;
 export type ErrorCallback = (message: string) => void;
 
 // ---------------------------------------------------------------------------
+// Runtime types
+// ---------------------------------------------------------------------------
+
+/** Which kind of runtime to use for a project. */
+export type RuntimeKind = "static" | "react";
+
+// ---------------------------------------------------------------------------
 // Runtime manager
 // ---------------------------------------------------------------------------
 
@@ -73,6 +81,8 @@ export class WorkspaceRuntime {
   private outputId = 0;
   private serverReadyUnsubscribe: (() => void) | null = null;
   private mounted = false;
+  private runtimeKind: RuntimeKind = "static";
+  private depsInstalled = false;
 
   // Callbacks
   private stateCallback: RuntimeStateCallback | null = null;
@@ -148,10 +158,12 @@ export class WorkspaceRuntime {
    * Mounts project files into /project inside the WebContainer.
    * Clears the previous /project contents first.
    */
-  async mountProject(files: WorkspaceFileRecord[]): Promise<void> {
+  async mountProject(files: WorkspaceFileRecord[], kind: RuntimeKind = "static"): Promise<void> {
     const container = await this.ensureBooted();
 
     this.setState("mounting");
+    this.runtimeKind = kind;
+    this.depsInstalled = false;
 
     // Clear previous project files.
     try {
@@ -184,7 +196,10 @@ export class WorkspaceRuntime {
   }
 
   /**
-   * Starts the static server process inside the WebContainer.
+   * Starts the project runtime inside the WebContainer.
+   *
+   * For static projects: spawns `node server.mjs`.
+   * For React projects: runs `npm install` (if needed) then `npm run dev`.
    *
    * Uses a generation token so a stale Run cannot overwrite a newer one.
    * The caller must ensure files are flushed (saved) before calling this.
@@ -204,60 +219,12 @@ export class WorkspaceRuntime {
         return;
       }
 
-      this.setState("starting");
       this.emitPreviewUrl(null);
 
-      // Spawn the static server process.
-      const process = await container.spawn("node", ["server.mjs"], {
-        cwd: WORKSPACE_PROJECT_ROOT,
-      });
-
-      // Only the current generation owns the process.
-      if (gen !== this.generation) {
-        process.kill();
-        return;
-      }
-
-      this.currentProcess = process;
-
-      // Capture stdout/stderr output.
-      if (process.output) {
-        const reader = process.output.getReader();
-        const readStream = async () => {
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (gen === this.generation && value) {
-                // Split on newlines to produce individual lines.
-                const lines = value.split("\n");
-                for (const line of lines) {
-                  if (line.length > 0) {
-                    this.emitOutput(line);
-                  }
-                }
-              }
-            }
-          } catch {
-            // Stream closed or process killed.
-          }
-        };
-        readStream();
-      }
-
-      // Wait for process exit.
-      const exitCode = await process.exit;
-
-      if (gen === this.generation) {
-        if (exitCode !== 0) {
-          this.emitOutput(`Process exited with code ${exitCode}`);
-          this.emitError(`Server process exited with code ${exitCode}`);
-          this.setState("error");
-        } else {
-          this.setState("idle");
-        }
-        this.currentProcess = null;
-        this.emitPreviewUrl(null);
+      if (this.runtimeKind === "react") {
+        await this.runReact(container, gen);
+      } else {
+        await this.runStatic(container, gen);
       }
     } catch (err) {
       if (gen === this.generation) {
@@ -266,6 +233,134 @@ export class WorkspaceRuntime {
         this.setState("error");
       }
     }
+  }
+
+  /**
+   * Run the static Node HTTP server.
+   */
+  private async runStatic(container: WebContainer, gen: number): Promise<void> {
+    this.setState("starting");
+
+    const process = await container.spawn("node", ["server.mjs"], {
+      cwd: WORKSPACE_PROJECT_ROOT,
+    });
+
+    if (gen !== this.generation) {
+      process.kill();
+      return;
+    }
+
+    this.currentProcess = process;
+    this.captureOutput(process, gen);
+
+    const exitCode = await process.exit;
+
+    if (gen === this.generation) {
+      if (exitCode !== 0) {
+        this.emitOutput(`Process exited with code ${exitCode}`);
+        this.emitError(`Server process exited with code ${exitCode}`);
+        this.setState("error");
+      } else {
+        this.setState("idle");
+      }
+      this.currentProcess = null;
+      this.emitPreviewUrl(null);
+    }
+  }
+
+  /**
+   * Run the React + TypeScript dev server via Vite.
+   *
+   * If dependencies are not yet installed, runs `npm install` first.
+   * Then runs `npm run dev` which starts Vite with --host 0.0.0.0.
+   */
+  private async runReact(container: WebContainer, gen: number): Promise<void> {
+    // Install dependencies if not already installed.
+    if (!this.depsInstalled) {
+      this.setState("installing");
+
+      const installProcess = await container.spawn("npm", ["install"], {
+        cwd: WORKSPACE_PROJECT_ROOT,
+      });
+
+      if (gen !== this.generation) {
+        installProcess.kill();
+        return;
+      }
+
+      this.captureOutput(installProcess, gen);
+
+      const installExit = await installProcess.exit;
+
+      if (gen !== this.generation) return;
+
+      if (installExit !== 0) {
+        this.emitOutput(`npm install exited with code ${installExit}`);
+        this.emitError(`Dependency installation failed (code ${installExit})`);
+        this.setState("error");
+        return;
+      }
+
+      this.depsInstalled = true;
+    }
+
+    // Start the Vite dev server.
+    this.setState("starting");
+
+    const devProcess = await container.spawn("npm", ["run", "dev"], {
+      cwd: WORKSPACE_PROJECT_ROOT,
+    });
+
+    if (gen !== this.generation) {
+      devProcess.kill();
+      return;
+    }
+
+    this.currentProcess = devProcess;
+    this.captureOutput(devProcess, gen);
+
+    // The dev server runs indefinitely; wait for exit.
+    const exitCode = await devProcess.exit;
+
+    if (gen === this.generation) {
+      if (exitCode !== 0) {
+        this.emitOutput(`Process exited with code ${exitCode}`);
+        this.emitError(`Dev server exited with code ${exitCode}`);
+        this.setState("error");
+      } else {
+        this.setState("idle");
+      }
+      this.currentProcess = null;
+      this.emitPreviewUrl(null);
+    }
+  }
+
+  /**
+   * Captures stdout/stderr from a WebContainer process and emits output lines.
+   * Only emits for the current generation.
+   */
+  private captureOutput(process: WebContainerProcess, gen: number): void {
+    if (!process.output) return;
+    const reader = process.output.getReader();
+    const readStream = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (gen === this.generation && value) {
+            const lines = value.split("\n");
+            for (const line of lines) {
+              if (line.length > 0) {
+                this.emitOutput(line);
+              }
+            }
+          }
+        }
+      } catch {
+        // Stream closed or process killed.
+      }
+    };
+    readStream();
   }
 
   /**
@@ -290,11 +385,11 @@ export class WorkspaceRuntime {
    * Switches to a new project: stops the current process, clears output,
    * and remounts the new project files.
    */
-  async switchProject(files: WorkspaceFileRecord[]): Promise<void> {
+  async switchProject(files: WorkspaceFileRecord[], kind: RuntimeKind = "static"): Promise<void> {
     await this.stop();
     this.outputId = 0;
     this.mounted = false;
-    await this.mountProject(files);
+    await this.mountProject(files, kind);
   }
 
   /**
@@ -341,4 +436,13 @@ export function getRuntime(): WorkspaceRuntime {
     runtimeInstance = new WorkspaceRuntime();
   }
   return runtimeInstance;
+}
+
+/**
+ * Determines the runtime kind for a project based on its template ID.
+ * React + TypeScript projects use the React runtime; everything else uses static.
+ */
+export function getRuntimeKind(templateId: string): RuntimeKind {
+  if (templateId === "react-ts") return "react";
+  return "static";
 }

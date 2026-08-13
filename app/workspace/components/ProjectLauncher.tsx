@@ -140,7 +140,7 @@ export function ProjectLauncher({ projects, creating, openingProjectId, retrying
                     )}
                     {isAvailable && (
                       <div className="text-xs text-gray-500">
-                        HTML, CSS, JavaScript
+                        {template.id === "react-ts" ? "React, TypeScript, Vite" : "HTML, CSS, JavaScript"}
                       </div>
                     )}
                   </button>

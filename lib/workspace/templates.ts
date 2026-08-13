@@ -278,6 +278,174 @@ const STATIC_PACKAGE_LOCK_JSON = JSON.stringify(
 ) + "\n";
 
 // ---------------------------------------------------------------------------
+// React + TypeScript template — file contents
+// ---------------------------------------------------------------------------
+
+const REACT_INDEX_HTML = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CoderXP React Project</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`;
+
+const REACT_PACKAGE_JSON = JSON.stringify(
+  {
+    name: "coderxp-react-project",
+    version: "1.0.0",
+    private: true,
+    type: "module",
+    scripts: {
+      dev: "vite --host 0.0.0.0",
+      build: "tsc && vite build",
+      preview: "vite preview",
+    },
+    dependencies: {
+      react: "^19.0.0",
+      "react-dom": "^19.0.0",
+    },
+    devDependencies: {
+      "@types/react": "^19.0.0",
+      "@types/react-dom": "^19.0.0",
+      "@vitejs/plugin-react": "^4.3.0",
+      typescript: "^5.6.0",
+      vite: "^6.0.0",
+    },
+  },
+  null,
+  2,
+) + "\n";
+
+const REACT_TSCONFIG_JSON = JSON.stringify(
+  {
+    compilerOptions: {
+      target: "ES2020",
+      useDefineForClassFields: true,
+      lib: ["ES2020", "DOM", "DOM.Iterable"],
+      module: "ESNext",
+      skipLibCheck: true,
+      moduleResolution: "bundler",
+      allowImportingTsExtensions: true,
+      isolatedModules: true,
+      moduleDetection: "force",
+      noEmit: true,
+      jsx: "react-jsx",
+      strict: true,
+      noUnusedLocals: true,
+      noUnusedParameters: true,
+      noFallthroughCasesInSwitch: true,
+    },
+    include: ["src"],
+  },
+  null,
+  2,
+) + "\n";
+
+const REACT_VITE_CONFIG_TS = `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: "0.0.0.0",
+  },
+});
+`;
+
+const REACT_MAIN_TSX = `import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
+`;
+
+const REACT_APP_TSX = `import { useState } from "react";
+
+export default function App() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <main>
+      <h1>CoderXP</h1>
+      <p>Edit <code>src/App.tsx</code> and press Run to see changes.</p>
+      <button onClick={() => setCount((c) => c + 1)}>
+        Count: {count}
+      </button>
+    </main>
+  );
+}
+`;
+
+const REACT_INDEX_CSS = `:root {
+  font-family: system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+main {
+  text-align: center;
+  padding: 2rem;
+}
+
+h1 {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+p {
+  color: #94a3b8;
+  margin-bottom: 1.5rem;
+}
+
+code {
+  background: #1e293b;
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.9em;
+}
+
+button {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: #3b82f6;
+  color: white;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button:hover {
+  background: #2563eb;
+}
+`;
+
+// ---------------------------------------------------------------------------
 // Template definitions
 // ---------------------------------------------------------------------------
 
@@ -314,9 +482,16 @@ export const PROJECT_TEMPLATES: Record<ProjectTemplateId, ProjectTemplate> = {
   "react-ts": {
     id: "react-ts",
     name: "React + TypeScript",
-    available: false,
-    unavailableReason: "Runtime verification pending",
-    files: [],
+    available: true,
+    files: [
+      { path: "package.json", contents: REACT_PACKAGE_JSON },
+      { path: "tsconfig.json", contents: REACT_TSCONFIG_JSON },
+      { path: "vite.config.ts", contents: REACT_VITE_CONFIG_TS },
+      { path: "index.html", contents: REACT_INDEX_HTML },
+      { path: "src/main.tsx", contents: REACT_MAIN_TSX },
+      { path: "src/App.tsx", contents: REACT_APP_TSX },
+      { path: "src/index.css", contents: REACT_INDEX_CSS },
+    ],
   },
   "nextjs-ts": {
     id: "nextjs-ts",
@@ -340,8 +515,7 @@ export const TEMPLATE_METADATA: TemplateMetadata[] = [
   {
     id: "react-ts",
     name: "React + TypeScript",
-    available: false,
-    unavailableReason: "Runtime verification pending",
+    available: true,
   },
   {
     id: "nextjs-ts",

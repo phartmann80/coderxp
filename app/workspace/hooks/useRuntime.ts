@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getRuntime, type RuntimeState, type OutputLine } from "@/lib/workspace/runtime";
+import { getRuntime, getRuntimeKind, type RuntimeState, type RuntimeKind, type OutputLine } from "@/lib/workspace/runtime";
 import { listProjectEntries } from "@/lib/workspace/persistence";
 import type { WorkspaceFileRecord } from "@/lib/workspace/types";
 
@@ -60,6 +60,7 @@ export function useRuntime(
   projectId: string | null,
   files: WorkspaceFileRecord[],
   flushAll: () => Promise<boolean>,
+  templateId: string | null,
 ): RuntimeApi {
   const [state, setState] = useState<RuntimeState>("idle");
   const [output, setOutput] = useState<OutputLine[]>([]);
@@ -98,9 +99,10 @@ export function useRuntime(
       setOutput([]);
       setError(null);
       setPreviewUrl(null);
-      runtimeRef.current.switchProject(files);
+      const kind = getRuntimeKind(templateId ?? "static-html");
+      runtimeRef.current.switchProject(files, kind);
     }
-  }, [projectId, files]);
+  }, [projectId, files, templateId]);
 
   const run = useCallback(async () => {
     if (!runtimeRef.current) return;
@@ -143,9 +145,10 @@ export function useRuntime(
       return;
     }
 
-    await runtimeRef.current.mountProject(freshFiles);
+    const kind = getRuntimeKind(templateId ?? "static-html");
+    await runtimeRef.current.mountProject(freshFiles, kind);
     await runtimeRef.current.run();
-  }, [flushAll, projectId]);
+  }, [flushAll, projectId, templateId]);
 
   const stop = useCallback(async () => {
     if (!runtimeRef.current) return;
@@ -166,15 +169,16 @@ export function useRuntime(
     setOutput([]);
     setError(null);
     setPreviewUrl(null);
-    await runtimeRef.current.switchProject(newFiles);
-  }, []);
+    const kind = getRuntimeKind(templateId ?? "static-html");
+    await runtimeRef.current.switchProject(newFiles, kind);
+  }, [templateId]);
 
   return {
     state,
     output,
     previewUrl,
     error,
-    isStarting: state === "booting" || state === "mounting" || state === "starting",
+    isStarting: state === "booting" || state === "mounting" || state === "installing" || state === "starting",
     isRunning: state === "running",
     previewKey,
     run,

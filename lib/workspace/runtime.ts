@@ -83,6 +83,10 @@ export class WorkspaceRuntime {
   private mounted = false;
   private runtimeKind: RuntimeKind = "static";
   private depsInstalled = false;
+  /** Source file paths from the last mount/sync, for removing deleted files. */
+  private mountedSourcePaths: Set<string> = new Set();
+  /** Cached package.json content to detect dependency changes. */
+  private lastPackageJsonContent: string | null = null;
 
   // Callbacks
   private stateCallback: RuntimeStateCallback | null = null;
@@ -165,7 +169,7 @@ export class WorkspaceRuntime {
     this.runtimeKind = kind;
     this.depsInstalled = false;
 
-    // Clear previous project files.
+    // Clear previous project files (full remount — destroys node_modules).
     try {
       await container.fs.rm(WORKSPACE_PROJECT_ROOT, { recursive: true, force: true });
     } catch {
@@ -173,6 +177,63 @@ export class WorkspaceRuntime {
     }
 
     // Write each file record into /project, preserving directory structure.
+    const sourcePaths = new Set<string>();
+    for (const file of files) {
+      if (file.kind !== "file") continue;
+      const fullPath = `${WORKSPACE_PROJECT_ROOT}/${file.path}`;
+      const contents = file.contents ?? "";
+
+      // Create parent directories if needed.
+      const lastSlash = fullPath.lastIndexOf("/");
+      if (lastSlash > WORKSPACE_PROJECT_ROOT.length) {
+        const dir = fullPath.slice(0, lastSlash);
+        try {
+          await container.fs.mkdir(dir, { recursive: true });
+        } catch {
+          // Directory may already exist.
+        }
+      }
+
+      await container.fs.writeFile(fullPath, contents);
+      sourcePaths.add(file.path);
+    }
+
+    // Track source paths and package.json content for syncProject().
+    this.mountedSourcePaths = sourcePaths;
+    const pkgJson = files.find((f) => f.path === "package.json");
+    this.lastPackageJsonContent = pkgJson?.contents ?? null;
+
+    this.mounted = true;
+  }
+
+  /**
+   * Syncs project source files into /project without destroying ephemeral
+   * runtime directories (node_modules, .next). Only source files are
+   * updated, added, or removed. If package.json content changed,
+   * depsInstalled is reset so npm install runs on the next Run.
+   *
+   * Use this instead of mountProject() when the same project is already
+   * mounted and you want to preserve installed dependencies.
+   */
+  async syncProject(files: WorkspaceFileRecord[], kind: RuntimeKind = "static"): Promise<void> {
+    const container = await this.ensureBooted();
+
+    this.setState("mounting");
+    this.runtimeKind = kind;
+
+    // Build the set of source file paths from the new file list.
+    const newSourcePaths = new Set<string>();
+    for (const file of files) {
+      if (file.kind !== "file") continue;
+      newSourcePaths.add(file.path);
+    }
+
+    // Detect package.json changes.
+    const newPkgJson = files.find((f) => f.path === "package.json");
+    const newPkgContent = newPkgJson?.contents ?? null;
+    const packageJsonChanged = newPkgContent !== this.lastPackageJsonContent;
+
+    // Write/update all source files.
     for (const file of files) {
       if (file.kind !== "file") continue;
       const fullPath = `${WORKSPACE_PROJECT_ROOT}/${file.path}`;
@@ -192,7 +253,39 @@ export class WorkspaceRuntime {
       await container.fs.writeFile(fullPath, contents);
     }
 
+    // Remove source files that no longer exist in the project.
+    // Skip ephemeral directories (node_modules, .next).
+    const ephemeralTopDirs = new Set(["node_modules", ".next"]);
+    for (const oldPath of this.mountedSourcePaths) {
+      if (!newSourcePaths.has(oldPath)) {
+        const topDir = oldPath.split("/")[0];
+        if (!ephemeralTopDirs.has(topDir)) {
+          try {
+            await container.fs.rm(`${WORKSPACE_PROJECT_ROOT}/${oldPath}`, { force: true });
+          } catch {
+            // File may already be gone.
+          }
+        }
+      }
+    }
+
+    // Update tracking state.
+    this.mountedSourcePaths = newSourcePaths;
+    this.lastPackageJsonContent = newPkgContent;
+
+    // Reset deps if package.json changed.
+    if (packageJsonChanged) {
+      this.depsInstalled = false;
+    }
+
     this.mounted = true;
+  }
+
+  /**
+   * Whether a project is currently mounted in the WebContainer.
+   */
+  isMounted(): boolean {
+    return this.mounted;
   }
 
   /**
@@ -278,9 +371,9 @@ export class WorkspaceRuntime {
    * Then runs `npm run dev` which starts Vite with --host 0.0.0.0.
    *
    * node_modules are preserved across Run presses within the same mount
-   * session. A remount (mountProject) resets depsInstalled, so switching
-   * projects or pressing Run after editing triggers a remount but reuses
-   * the existing node_modules if the same project is remounted.
+   * session. syncProject() updates source files without destroying
+   * node_modules. depsInstalled is only reset when package.json changes
+   * or on a full remount (mountProject / switchProject).
    */
   private async runReact(container: WebContainer, gen: number): Promise<void> {
     await this.runDevRuntime(container, gen);
@@ -307,8 +400,9 @@ export class WorkspaceRuntime {
    * 3. Wait for server-ready event from WebContainer
    *
    * node_modules persist in the WebContainer filesystem across Run presses
-   * within the same mount session. depsInstalled is only reset when
-   * mountProject is called (new project or explicit remount).
+   * within the same mount session. syncProject() updates source files
+   * without destroying node_modules. depsInstalled is only reset when
+   * package.json content changes or on a full remount.
    */
   private async runDevRuntime(container: WebContainer, gen: number): Promise<void> {
     // Install dependencies if not already installed.
@@ -425,6 +519,9 @@ export class WorkspaceRuntime {
     await this.stop();
     this.outputId = 0;
     this.mounted = false;
+    this.mountedSourcePaths = new Set();
+    this.lastPackageJsonContent = null;
+    this.depsInstalled = false;
     await this.mountProject(files, kind);
   }
 
@@ -455,6 +552,8 @@ export class WorkspaceRuntime {
     }
     this.container = null;
     this.mounted = false;
+    this.mountedSourcePaths = new Set();
+    this.lastPackageJsonContent = null;
   }
 }
 

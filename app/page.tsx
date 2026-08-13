@@ -20,7 +20,7 @@ import {
 
 export default function HomePage() {
   return (
-    <div className="flex flex-col gap-16 md:gap-24 px-8 md:py-12">
+    <div className="flex flex-col gap-16 md:gap-24 py-8 md:py-12">
       
       {/* HERO SECTION */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 md:pt-8 text-center space-y-8">
@@ -33,7 +33,7 @@ export default function HomePage() {
 
         {/* Main Headline */}
         <h1 className="text-4xl sm:text-6xl lg:text-7xl font-bold tracking-tight text-white max-w-5xl mx-auto leading-[1.1]">
-           Software creation engineered for <span className="text-transparent bg-clip-text bg-gradient-to-r from-white via-gray-200 to-accent-cyan">craftsmen</span>.
+          Software creation engineered for <span className="text-transparent bg-clip-text bg-gradient-to-r from-white via-gray-200 to-accent-cyan">craftsmen</span>.
         </h1>
 
         {/* Subtitle */}
@@ -188,7 +188,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* BUILD FOR USER ROLES (AUTHENTIC TESTIMONIAL CAROUSEL) */}
+      {/* BUILT FOR USER ROLES (AUTHENTIC TESTIMONIAL CAROUSEL) */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
         <div className="text-center space-y-2">
           <h2 className="text-2xl font-bold text-white">Engineered for your workflow</h2>

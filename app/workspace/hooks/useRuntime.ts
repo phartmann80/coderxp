@@ -146,7 +146,16 @@ export function useRuntime(
     }
 
     const kind = getRuntimeKind(templateId ?? "static-html");
-    await runtimeRef.current.mountProject(freshFiles, kind);
+
+    // If the same project is already mounted, sync source files without
+    // destroying node_modules. This preserves installed dependencies across
+    // Run presses. mountProject (full remount) is only used on first mount
+    // or project switch.
+    if (runtimeRef.current.isMounted()) {
+      await runtimeRef.current.syncProject(freshFiles, kind);
+    } else {
+      await runtimeRef.current.mountProject(freshFiles, kind);
+    }
     await runtimeRef.current.run();
   }, [flushAll, projectId, templateId]);
 

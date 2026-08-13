@@ -62,7 +62,7 @@ export default function FeaturesPage() {
           return (
             <div key={f.title} className="p-6 rounded-xl glass-panel space-y-4 flex flex-col justify-between">
               <div className="space-y-3">
-                <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify text-accent-cyan">
+                <div className="w-10 h-10 rounded-lg bg-obsidian-deep border border-titanium-border flex items-center justify-center text-accent-cyan">
                   <Icon className="w-5 h-5" />
                 </div>
                 <h3 className="text-base font-semibold text-white">{f.title}</h3>

@@ -172,3 +172,13 @@ export async function removeProjectRoot(): Promise<void> {
 export function isBooted(): boolean {
   return booted;
 }
+
+/**
+ * Returns the shared WebContainer singleton if it is already booted.
+ * Does not start a boot. Callers that need the instance without
+ * creating a second container (file sync, command tooling) should
+ * use this instead of WebContainer.boot().
+ */
+export function getBootedWebContainer(): WebContainer | null {
+  return booted && webContainerInstance ? webContainerInstance : null;
+}

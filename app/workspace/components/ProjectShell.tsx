@@ -16,6 +16,8 @@
  *
  * M3.3: wires the local Agent Chat shell (useAgentChat) into RuntimePanel.
  * Additive only — ProjectShell layout is unchanged. No agent loop.
+ *
+ * M3.4: wires useFileSync for WebContainer -> IndexedDB additive sync.
  */
 
 import { useMemo, useState, useCallback, useRef } from "react";
@@ -37,6 +39,7 @@ import { TerminalPanel } from "./TerminalPanel";
 import { useRuntime } from "../hooks/useRuntime";
 import { useCommands } from "../hooks/useCommands";
 import { useAgentChat } from "../hooks/useAgentChat";
+import { useFileSync } from "../hooks/useFileSync";
 import { getTerminal } from "@/lib/workspace/terminal";
 import { getCommandController } from "@/lib/workspace/command-controller";
 import {
@@ -136,6 +139,13 @@ export function ProjectShell({
 
   const commands = useCommands();
   const chat = useAgentChat(project.id);
+  // Auto-sync is effect-driven inside the hook (command complete / Run complete).
+  useFileSync(
+    project.id,
+    commands.commands,
+    runtime.state,
+    onRefreshFiles,
+  );
 
   // Handle running a command from the CommandPanel.
   const handleCommandRun = async (input: string) => {

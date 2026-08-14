@@ -1,17 +1,19 @@
 "use client";
 
 /**
- * Runtime panel for CoderXP M3.1.
+ * Runtime panel for CoderXP M3.3.
  *
- * Bottom workspace panel with Terminal, Output, and Preview tabs.
+ * Bottom workspace panel with Terminal, Output, Commands, Agent, and Preview tabs.
  *
  * Layout:
- * ┌ Terminal | Output | Preview ────────────────┐
- * │  [tab content]                              │
- * └─────────────────────────────────────────────┘
+ * ┌ Terminal | Output | Commands | Agent | Preview ─┐
+ * │  [tab content]                                   │
+ * └──────────────────────────────────────────────────┘
  *
  * Terminal: interactive user/agent shell (xterm.js + WebContainer jsh)
  * Output:   managed CoderXP runtime/process output (read-only)
+ * Commands: structured command controller UI
+ * Agent:    local chat shell (no provider, no LLM — M3.5 HOLD)
  * Preview:  live preview iframe from the runtime server-ready URL
  *
  * Sits below the editor in the ProjectShell layout.
@@ -22,10 +24,12 @@ import { OutputPanel } from "./OutputPanel";
 import { PreviewPanel } from "./PreviewPanel";
 import { TerminalPanel } from "./TerminalPanel";
 import { CommandPanel } from "./CommandPanel";
+import { AgentChatPanel } from "./AgentChatPanel";
 import type { RuntimeState, OutputLine } from "@/lib/workspace/runtime";
 import type { CommandResult } from "@/lib/workspace/command-controller";
+import type { AgentChatMessage } from "../hooks/useAgentChat";
 
-type PanelTab = "terminal" | "output" | "preview" | "commands";
+type PanelTab = "terminal" | "output" | "preview" | "commands" | "agent";
 
 interface RuntimePanelProps {
   /** Output lines from the runtime process. */
@@ -56,6 +60,12 @@ interface RuntimePanelProps {
   onCommandCancel: (processId: string) => void;
   /** Clear completed commands. */
   onCommandClear: () => void;
+  /** Local agent-chat messages. */
+  chatMessages: AgentChatMessage[];
+  /** Append a local user chat message. */
+  onChatSend: (text: string) => void;
+  /** Clear the local chat transcript. */
+  onChatClear: () => void;
 }
 
 export function RuntimePanel({
@@ -73,6 +83,9 @@ export function RuntimePanel({
   onCommandRun,
   onCommandCancel,
   onCommandClear,
+  chatMessages,
+  onChatSend,
+  onChatClear,
 }: RuntimePanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>("preview");
 
@@ -111,6 +124,16 @@ export function RuntimePanel({
           Commands
         </button>
         <button
+          onClick={() => setActiveTab("agent")}
+          className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeTab === "agent"
+              ? "text-gray-200 border-b-2 border-cyan-500"
+              : "text-gray-500 hover:text-gray-400"
+          }`}
+        >
+          Agent
+        </button>
+        <button
           onClick={() => setActiveTab("preview")}
           className={`px-3 py-1.5 text-xs font-medium transition-colors ${
             activeTab === "preview"
@@ -141,6 +164,13 @@ export function RuntimePanel({
             onRun={onCommandRun}
             onCancel={onCommandCancel}
             onClear={onCommandClear}
+          />
+        )}
+        {activeTab === "agent" && (
+          <AgentChatPanel
+            messages={chatMessages}
+            onSend={onChatSend}
+            onClear={onChatClear}
           />
         )}
         {activeTab === "preview" && (

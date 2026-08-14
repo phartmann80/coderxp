@@ -13,6 +13,9 @@
  * - Editor tabs and active-file state follow renamed paths.
  * - Never leaves the editor showing a file that no longer exists.
  * - No automatic Run after filesystem operations.
+ *
+ * M3.3: wires the local Agent Chat shell (useAgentChat) into RuntimePanel.
+ * Additive only — ProjectShell layout is unchanged. No agent loop.
  */
 
 import { useMemo, useState, useCallback, useRef } from "react";
@@ -33,6 +36,7 @@ import { RuntimePanel } from "./RuntimePanel";
 import { TerminalPanel } from "./TerminalPanel";
 import { useRuntime } from "../hooks/useRuntime";
 import { useCommands } from "../hooks/useCommands";
+import { useAgentChat } from "../hooks/useAgentChat";
 import { getTerminal } from "@/lib/workspace/terminal";
 import { getCommandController } from "@/lib/workspace/command-controller";
 import {
@@ -131,6 +135,7 @@ export function ProjectShell({
   }, project.templateId);
 
   const commands = useCommands();
+  const chat = useAgentChat(project.id);
 
   // Handle running a command from the CommandPanel.
   const handleCommandRun = async (input: string) => {
@@ -622,6 +627,9 @@ export function ProjectShell({
               onCommandRun={handleCommandRun}
               onCommandCancel={commands.cancelCommand}
               onCommandClear={commands.clearCompleted}
+              chatMessages={chat.messages}
+              onChatSend={chat.send}
+              onChatClear={chat.clear}
             />
           </div>
         </div>

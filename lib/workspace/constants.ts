@@ -59,3 +59,14 @@ export const MAX_PROJECT_NAME_LENGTH = 100;
 
 /** Default port for the static template dev server. */
 export const DEFAULT_DEV_PORT = 3000;
+
+// ---------------------------------------------------------------------------
+// M3.4 — filesystem sync limits
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum size of a text file persisted by the WebContainer -> IndexedDB
+ * sync. Files above this are skipped before being decoded, so an oversized
+ * generated artifact never reaches IndexedDB or the decoder.
+ */
+export const MAX_SYNC_TEXT_FILE_BYTES = 1 * 1024 * 1024;

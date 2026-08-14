@@ -11,6 +11,16 @@
  * Generated/runtime directories are ignored (node_modules, .next, dist,
  * .git, etc.). Only project source files that belong in persistence.
  *
+ * Each candidate file is read as raw bytes first so its size is known
+ * before anything is decoded:
+ *
+ *   read Uint8Array -> over MAX_SYNC_TEXT_FILE_BYTES? skip
+ *                   -> null byte present? skip (binary)
+ *                   -> UTF-8 decode -> IndexedDB
+ *
+ * A skipped artifact is reported in FileSyncResult.skipped. It is not an
+ * error and never aborts the sync pass.
+ *
  * Uses existing persistence helpers (putEntry / listProjectEntries).
  * Uses the shared WebContainer singleton from runtime-client.
  * Does not boot a second container.
@@ -19,7 +29,7 @@
 import type { WebContainer } from "@webcontainer/api";
 import { getBootedWebContainer } from "./runtime-client";
 import { getRuntime } from "./runtime";
-import { WORKSPACE_PROJECT_ROOT } from "./constants";
+import { MAX_SYNC_TEXT_FILE_BYTES, WORKSPACE_PROJECT_ROOT } from "./constants";
 import { listProjectEntries, putEntry } from "./persistence";
 import { normalizeAndValidateWorkspacePath } from "./path-utils";
 
@@ -54,6 +64,20 @@ export interface FileSyncResult {
   updated: number;
   /** Existing files whose contents matched. */
   unchanged: number;
+  /** Files skipped as oversized or binary. Not an error. */
+  skipped: number;
+}
+
+/** Files skipped during a container walk, with the reason. */
+export interface SkippedContainerFile {
+  path: string;
+  reason: "oversize" | "binary" | "unreadable";
+}
+
+/** A container walk: readable text files plus what was skipped. */
+export interface ContainerScan {
+  files: ContainerSourceFile[];
+  skipped: SkippedContainerFile[];
 }
 
 interface DirEntLike {
@@ -67,30 +91,76 @@ function isIgnoredDir(name: string): boolean {
 }
 
 /**
- * Recursively list source files under /project in the shared container.
- * Returns an empty list when the runtime has no mounted project or the
+ * Recursively scan source files under /project in the shared container.
+ * Returns an empty scan when the runtime has no mounted project or the
  * singleton is not booted.
  */
-export async function listContainerSourceFiles(): Promise<ContainerSourceFile[]> {
+export async function scanContainerSourceFiles(): Promise<ContainerScan> {
+  const scan: ContainerScan = { files: [], skipped: [] };
+
   if (!getRuntime().isMounted()) {
-    return [];
+    return scan;
   }
 
   const container = getBootedWebContainer();
   if (!container) {
-    return [];
+    return scan;
   }
 
-  const out: ContainerSourceFile[] = [];
-  await walkDir(container, WORKSPACE_PROJECT_ROOT, "", out);
-  return out;
+  await walkDir(container, WORKSPACE_PROJECT_ROOT, "", scan);
+  return scan;
+}
+
+/** Text files only. Retained for callers that do not need skip details. */
+export async function listContainerSourceFiles(): Promise<ContainerSourceFile[]> {
+  const scan = await scanContainerSourceFiles();
+  return scan.files;
+}
+
+/**
+ * Reads one container file as bytes and decodes it only if it is within
+ * the size limit and contains no null byte.
+ */
+async function readTextFileGuarded(
+  container: WebContainer,
+  absPath: string,
+): Promise<{ contents: string } | { reason: SkippedContainerFile["reason"] }> {
+  let bytes: Uint8Array;
+  try {
+    // No encoding argument: WebContainer returns raw bytes, so the size
+    // is known before the artifact is decoded as text.
+    bytes = await container.fs.readFile(absPath);
+  } catch {
+    return { reason: "unreadable" };
+  }
+
+  if (!(bytes instanceof Uint8Array)) {
+    return { reason: "unreadable" };
+  }
+
+  if (bytes.byteLength > MAX_SYNC_TEXT_FILE_BYTES) {
+    return { reason: "oversize" };
+  }
+
+  if (bytes.includes(0)) {
+    return { reason: "binary" };
+  }
+
+  try {
+    // fatal: invalid UTF-8 is treated as binary rather than persisted
+    // with replacement characters.
+    const contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return { contents };
+  } catch {
+    return { reason: "binary" };
+  }
 }
 
 async function walkDir(
   container: WebContainer,
   absDir: string,
   relDir: string,
-  out: ContainerSourceFile[],
+  scan: ContainerScan,
 ): Promise<void> {
   let entries: unknown;
   try {
@@ -112,18 +182,17 @@ async function walkDir(
     const absPath = `${absDir}/${name}`;
 
     if (direntIsDirectory(entry)) {
-      await walkDir(container, absPath, relPath, out);
+      await walkDir(container, absPath, relPath, scan);
       continue;
     }
 
-    try {
-      const contents = await container.fs.readFile(absPath, "utf-8");
-      if (typeof contents !== "string") continue;
-      if (contents.includes("\0")) continue;
-      out.push({ path: relPath, contents });
-    } catch {
-      // Unreadable or non-text file — skip.
+    const read = await readTextFileGuarded(container, absPath);
+    if ("contents" in read) {
+      scan.files.push({ path: relPath, contents: read.contents });
+      continue;
     }
+    // Oversized, binary, or unreadable: recorded, never fatal.
+    scan.skipped.push({ path: relPath, reason: read.reason });
   }
 }
 
@@ -153,9 +222,12 @@ function direntIsDirectory(entry: unknown): boolean {
  * Additions and content updates are written via putEntry.
  * Files present in IndexedDB but missing from the container are left
  * untouched (no deletion).
+ *
+ * Oversized and binary artifacts are skipped and counted, not imported.
  */
 export async function syncContainerToIndexedDB(projectId: string): Promise<FileSyncResult> {
-  const containerFiles = await listContainerSourceFiles();
+  const scan = await scanContainerSourceFiles();
+  const containerFiles = scan.files;
   const existing = await listProjectEntries(projectId);
   const existingFiles = new Map(
     existing.filter((e) => e.kind === "file").map((e) => [e.path, e.contents ?? ""]),
@@ -164,12 +236,14 @@ export async function syncContainerToIndexedDB(projectId: string): Promise<FileS
   let added = 0;
   let updated = 0;
   let unchanged = 0;
+  let skipped = scan.skipped.length;
 
   for (const file of containerFiles) {
     let normalised: string;
     try {
       normalised = normalizeAndValidateWorkspacePath(file.path);
     } catch {
+      skipped += 1;
       continue;
     }
 
@@ -179,7 +253,8 @@ export async function syncContainerToIndexedDB(projectId: string): Promise<FileS
         await putEntry(projectId, normalised, "file", file.contents);
         added += 1;
       } catch {
-        // Skip entries the persistence layer rejects.
+        // Persistence rejected this entry — counted, never fatal.
+        skipped += 1;
       }
       continue;
     }
@@ -193,11 +268,12 @@ export async function syncContainerToIndexedDB(projectId: string): Promise<FileS
       await putEntry(projectId, normalised, "file", file.contents);
       updated += 1;
     } catch {
-      // Skip entries the persistence layer rejects.
+      // Persistence rejected this entry — counted, never fatal.
+      skipped += 1;
     }
   }
 
-  return { added, updated, unchanged };
+  return { added, updated, unchanged, skipped };
 }
 
 /**

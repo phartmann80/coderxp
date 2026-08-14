@@ -43,6 +43,8 @@ export interface FileSyncApi {
   error: string | null;
   /** Count of files added or updated in the last successful sync. */
   syncedCount: number;
+  /** Files skipped as oversized or binary in the last sync. Not an error. */
+  skippedCount: number;
   /** Run a sync pass now if the project is present in the container. */
   syncNow: () => Promise<void>;
   /**
@@ -163,6 +165,7 @@ export function useFileSync(
     lastResult,
     error,
     syncedCount: lastResult ? lastResult.added + lastResult.updated : 0,
+    skippedCount: lastResult ? lastResult.skipped : 0,
     syncNow,
     invalidateProject,
   };

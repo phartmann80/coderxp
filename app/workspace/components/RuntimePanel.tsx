@@ -13,7 +13,8 @@
  * Terminal: interactive user/agent shell (xterm.js + WebContainer jsh)
  * Output:   managed CoderXP runtime/process output (read-only)
  * Commands: structured command controller UI
- * Agent:    local chat shell (no provider, no LLM — M3.5 HOLD)
+ * Agent:    provider-independent conversation shell (M3.3). No vendor
+ *           code here; a transport adapter arrives in M3.9.
  * Preview:  live preview iframe from the runtime server-ready URL
  *
  * Sits below the editor in the ProjectShell layout.
@@ -27,7 +28,7 @@ import { CommandPanel } from "./CommandPanel";
 import { AgentChatPanel } from "./AgentChatPanel";
 import type { RuntimeState, OutputLine } from "@/lib/workspace/runtime";
 import type { CommandResult } from "@/lib/workspace/command-controller";
-import type { AgentChatMessage } from "../hooks/useAgentChat";
+import type { AgentMessage } from "@/lib/workspace/agent-protocol";
 
 type PanelTab = "terminal" | "output" | "preview" | "commands" | "agent";
 
@@ -60,11 +61,17 @@ interface RuntimePanelProps {
   onCommandCancel: (processId: string) => void;
   /** Clear completed commands. */
   onCommandClear: () => void;
-  /** Local agent-chat messages. */
-  chatMessages: AgentChatMessage[];
-  /** Append a local user chat message. */
+  /** Agent conversation transcript. */
+  chatMessages: AgentMessage[];
+  /** True while an assistant turn is streaming. */
+  chatStreaming: boolean;
+  /** True when an agent transport is configured. */
+  chatConnected: boolean;
+  /** Append a user message and start a turn. */
   onChatSend: (text: string) => void;
-  /** Clear the local chat transcript. */
+  /** Abort the active agent stream. */
+  onChatCancel: () => void;
+  /** Start a new conversation. */
   onChatClear: () => void;
 }
 
@@ -84,7 +91,10 @@ export function RuntimePanel({
   onCommandCancel,
   onCommandClear,
   chatMessages,
+  chatStreaming,
+  chatConnected,
   onChatSend,
+  onChatCancel,
   onChatClear,
 }: RuntimePanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>("preview");
@@ -169,7 +179,10 @@ export function RuntimePanel({
         {activeTab === "agent" && (
           <AgentChatPanel
             messages={chatMessages}
+            isStreaming={chatStreaming}
+            isConnected={chatConnected}
             onSend={onChatSend}
+            onCancel={onChatCancel}
             onClear={onChatClear}
           />
         )}

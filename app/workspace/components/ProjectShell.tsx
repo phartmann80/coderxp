@@ -14,8 +14,9 @@
  * - Never leaves the editor showing a file that no longer exists.
  * - No automatic Run after filesystem operations.
  *
- * M3.3: wires the local Agent Chat shell (useAgentChat) into RuntimePanel.
- * Additive only — ProjectShell layout is unchanged. No agent loop.
+ * M3.3: wires the agent conversation controller (useAgentChat) into
+ * RuntimePanel. Additive only — ProjectShell layout is unchanged. No
+ * provider is configured here; transports arrive in M3.9.
  *
  * M3.4: wires useFileSync for WebContainer -> IndexedDB additive sync.
  */
@@ -638,7 +639,10 @@ export function ProjectShell({
               onCommandCancel={commands.cancelCommand}
               onCommandClear={commands.clearCompleted}
               chatMessages={chat.messages}
+              chatStreaming={chat.isStreaming}
+              chatConnected={chat.isConnected}
               onChatSend={chat.send}
+              onChatCancel={chat.cancel}
               onChatClear={chat.clear}
             />
           </div>

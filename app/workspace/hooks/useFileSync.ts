@@ -9,6 +9,12 @@
  * when Preview/runtime is currently idle — not only when runtime
  * state === "running".
  *
+ * Lifecycle (M3.4 correction):
+ * - invalidateProject() runs only on a real projectId change (ref compare).
+ *   Sync status / progress / file-count must never be in that effect's deps.
+ * - A generation token drops stale in-flight syncs so they cannot apply
+ *   results or "invalidate" a newer pass.
+ *
  * Contract:
  * - container -> IndexedDB additions YES
  * - container -> IndexedDB updates YES
@@ -46,6 +52,10 @@ export interface FileSyncApi {
   invalidateProject: () => void;
 }
 
+function isCompletedState(state: CommandResult["state"]): boolean {
+  return state === "exited" || state === "failed" || state === "cancelled";
+}
+
 /**
  * WebContainer -> IndexedDB sync, keyed to the open project.
  *
@@ -62,64 +72,84 @@ export function useFileSync(
   const [lastResult, setLastResult] = useState<FileSyncResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const syncingRef = useRef(false);
   const onFilesChangedRef = useRef(onFilesChanged);
   onFilesChangedRef.current = onFilesChanged;
 
+  /** Bumped on project switch and on each new syncNow. Stale passes must no-op. */
+  const generationRef = useRef(0);
+  /** Last projectId that owned this hook instance. */
+  const projectIdRef = useRef(projectId);
+  const commandsRef = useRef(commands);
+  commandsRef.current = commands;
+  /** Command ids already observed; seeded so leftover history does not auto-sync. */
+  const completedSeenRef = useRef<Set<string>>(new Set(commands.map((c) => c.id)));
+  const prevRuntimeRef = useRef(runtimeState);
+
   const invalidateProject = useCallback(() => {
+    generationRef.current += 1;
     setStatus("idle");
     setLastResult(null);
     setError(null);
+    // Mark every currently known command as seen so leftover singleton
+    // history cannot start a sync for the newly selected project.
+    const seen = new Set<string>();
+    for (const command of commandsRef.current) {
+      seen.add(command.id);
+    }
+    completedSeenRef.current = seen;
   }, []);
 
-  // First-cut project reset. Commit 3 hardens this with a projectId ref
-  // so status/progress rerenders cannot re-fire invalidation.
+  // Real project switches only. Do not list status / lastResult / syncedCount
+  // here — a sync-state rerender must not self-invalidate an active pass.
   useEffect(() => {
+    if (projectIdRef.current === projectId) return;
+    projectIdRef.current = projectId;
     invalidateProject();
   }, [projectId, invalidateProject]);
 
   const syncNow = useCallback(async () => {
     if (!projectId) return;
+    // Preview may be idle; the shared container still holds the project.
     if (!isProjectPresentInContainer()) return;
-    if (syncingRef.current) return;
 
-    syncingRef.current = true;
+    const gen = ++generationRef.current;
     setStatus("syncing");
     setError(null);
 
     try {
       const result = await syncContainerToIndexedDB(projectId);
+      if (gen !== generationRef.current) return;
       setLastResult(result);
       setStatus("idle");
       if (result.added > 0 || result.updated > 0) {
         onFilesChangedRef.current?.();
       }
     } catch (err) {
+      if (gen !== generationRef.current) return;
       setStatus("error");
       setError(err instanceof Error ? err.message : "File sync failed.");
-    } finally {
-      syncingRef.current = false;
     }
   }, [projectId]);
 
-  const completedKey = commands
-    .filter((c) => c.state === "exited" || c.state === "failed" || c.state === "cancelled")
-    .map((c) => c.id)
-    .join(",");
-
-  // Auto-sync after a completed command when the project is mounted,
-  // even if Preview/runtime is idle.
+  // Auto-sync after a newly completed command even when runtime is idle,
+  // as long as the active project exists in the shared WebContainer.
   useEffect(() => {
-    if (!completedKey) return;
+    let sawNew = false;
+    for (const command of commands) {
+      if (!isCompletedState(command.state)) continue;
+      if (completedSeenRef.current.has(command.id)) continue;
+      completedSeenRef.current.add(command.id);
+      sawNew = true;
+    }
+    if (!sawNew) return;
     void syncNow();
-  }, [completedKey, syncNow]);
+  }, [commands, syncNow]);
 
-  const prevRuntimeRef = useRef(runtimeState);
   useEffect(() => {
     const prev = prevRuntimeRef.current;
     prevRuntimeRef.current = runtimeState;
 
-    // Also sync after Run completes (process reached running or returned to idle).
+    // Also sync after Run completes (reached running, or returned to idle).
     const runFinished =
       (prev === "starting" || prev === "installing") && runtimeState === "running";
     const runStopped = prev === "running" && runtimeState === "idle";

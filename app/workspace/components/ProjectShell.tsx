@@ -19,6 +19,11 @@
  * provider is configured here; transports arrive in M3.9.
  *
  * M3.4: wires useFileSync for WebContainer -> IndexedDB additive sync.
+ *
+ * M3.5: wires useAgentTools, which binds the agent tool bridge to the
+ * authoritative file list, the command controller, and the runtime. Nothing
+ * invokes those tools yet — the execution loop is M3.7 and provider adapters
+ * are M3.9. No layout change.
  */
 
 import { useMemo, useState, useCallback, useRef } from "react";
@@ -41,6 +46,7 @@ import { useRuntime } from "../hooks/useRuntime";
 import { useCommands } from "../hooks/useCommands";
 import { useAgentChat } from "../hooks/useAgentChat";
 import { useFileSync } from "../hooks/useFileSync";
+import { useAgentTools } from "../hooks/useAgentTools";
 import { getTerminal } from "@/lib/workspace/terminal";
 import { getCommandController } from "@/lib/workspace/command-controller";
 import {
@@ -147,6 +153,20 @@ export function ProjectShell({
     runtime.state,
     onRefreshFiles,
   );
+
+  // M3.5 tool bridge. Bound here because this is where the authoritative file
+  // list, the runtime, and the command controller already meet. Held for the
+  // M3.7 execution loop; no caller invokes it in this milestone.
+  useAgentTools({
+    projectId: project.id,
+    templateId: project.templateId,
+    runtimeState: runtime.state,
+    previewUrl: runtime.previewUrl,
+    runtimeError: runtime.error,
+    onRefreshFiles,
+    onRunProject: runtime.run,
+    onStopProject: runtime.stop,
+  });
 
   // Handle running a command from the CommandPanel.
   const handleCommandRun = async (input: string) => {

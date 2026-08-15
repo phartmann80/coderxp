@@ -1,4 +1,14 @@
+import type { Metadata } from "next";
 import { Key, ShieldCheck, Lock, Server, Zap, RefreshCw } from "lucide-react";
+
+export const metadata: Metadata = {
+  title: "Bring Your Own Key (BYOK) | CoderXP",
+  description:
+    "Connect your OpenAI, Anthropic, Gemini, DeepSeek, Groq, and OpenRouter API keys directly with client-side encryption.",
+  alternates: {
+    canonical: "/bring-your-own-key",
+  },
+};
 
 export default function ByokPage() {
   return (

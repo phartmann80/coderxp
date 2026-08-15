@@ -217,6 +217,18 @@ function direntIsDirectory(entry: unknown): boolean {
 }
 
 /**
+ * Ownership guard for a sync pass.
+ *
+ * Returns false once this pass no longer owns the active project — for
+ * example after a project switch remounted the shared container. The pass
+ * stops writing immediately. Losing ownership is not an error.
+ */
+export type SyncOwnershipGuard = () => boolean;
+
+/** Default guard for callers that do not track ownership. */
+const ALWAYS_OWNS: SyncOwnershipGuard = () => true;
+
+/**
  * Sync source files from the shared WebContainer into IndexedDB.
  *
  * Additions and content updates are written via putEntry.
@@ -224,19 +236,42 @@ function direntIsDirectory(entry: unknown): boolean {
  * untouched (no deletion).
  *
  * Oversized and binary artifacts are skipped and counted, not imported.
+ *
+ * Ownership is re-checked after the container scan, after the IndexedDB
+ * read, and immediately before every putEntry. The container is a shared
+ * singleton, so a project switch can remount /project while a scan is in
+ * flight; without the pre-write checks, contents belonging to the newly
+ * mounted project could be persisted under the previous projectId. Any
+ * write performed before ownership was lost stands; no further write is
+ * issued after it.
  */
-export async function syncContainerToIndexedDB(projectId: string): Promise<FileSyncResult> {
+export async function syncContainerToIndexedDB(
+  projectId: string,
+  ownsSync: SyncOwnershipGuard = ALWAYS_OWNS,
+): Promise<FileSyncResult> {
   const scan = await scanContainerSourceFiles();
-  const containerFiles = scan.files;
-  const existing = await listProjectEntries(projectId);
-  const existingFiles = new Map(
-    existing.filter((e) => e.kind === "file").map((e) => [e.path, e.contents ?? ""]),
-  );
 
   let added = 0;
   let updated = 0;
   let unchanged = 0;
   let skipped = scan.skipped.length;
+
+  // The scan may have observed a container that was remounted for another
+  // project. Nothing has been written yet, so stop before persistence.
+  if (!ownsSync()) {
+    return { added, updated, unchanged, skipped };
+  }
+
+  const containerFiles = scan.files;
+  const existing = await listProjectEntries(projectId);
+
+  if (!ownsSync()) {
+    return { added, updated, unchanged, skipped };
+  }
+
+  const existingFiles = new Map(
+    existing.filter((e) => e.kind === "file").map((e) => [e.path, e.contents ?? ""]),
+  );
 
   for (const file of containerFiles) {
     let normalised: string;
@@ -248,25 +283,25 @@ export async function syncContainerToIndexedDB(projectId: string): Promise<FileS
     }
 
     const previous = existingFiles.get(normalised);
-    if (previous === undefined) {
-      try {
-        await putEntry(projectId, normalised, "file", file.contents);
-        added += 1;
-      } catch {
-        // Persistence rejected this entry — counted, never fatal.
-        skipped += 1;
-      }
-      continue;
-    }
 
     if (previous === file.contents) {
       unchanged += 1;
       continue;
     }
 
+    // Re-checked before every write, not once per pass: ownership can be
+    // lost between two writes of the same pass.
+    if (!ownsSync()) {
+      return { added, updated, unchanged, skipped };
+    }
+
     try {
       await putEntry(projectId, normalised, "file", file.contents);
-      updated += 1;
+      if (previous === undefined) {
+        added += 1;
+      } else {
+        updated += 1;
+      }
     } catch {
       // Persistence rejected this entry — counted, never fatal.
       skipped += 1;

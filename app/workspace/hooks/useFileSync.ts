@@ -118,8 +118,13 @@ export function useFileSync(
     setStatus("syncing");
     setError(null);
 
+    // Checked inside the sync before every write, not only on return: the
+    // container is shared, so a project switch mid-pass must not persist
+    // the newly mounted project's files under this projectId.
+    const ownsSync = () => gen === generationRef.current;
+
     try {
-      const result = await syncContainerToIndexedDB(projectId);
+      const result = await syncContainerToIndexedDB(projectId, ownsSync);
       if (gen !== generationRef.current) return;
       setLastResult(result);
       setStatus("idle");

@@ -82,7 +82,12 @@ export type AgentToolErrorCode =
   /** The content exceeded a tool limit. */
   | "TOO_LARGE"
   /** The project does not define what the tool needs, e.g. a test script. */
-  | "NOT_CONFIGURED";
+  | "NOT_CONFIGURED"
+  /**
+   * Pending editor drafts could not be saved, so IndexedDB is not current.
+   * The tool did not run; the user's unsaved work is untouched.
+   */
+  | "EDITOR_FLUSH_FAILED";
 
 export interface AgentToolError {
   code: AgentToolErrorCode;

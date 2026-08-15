@@ -13,6 +13,13 @@
  * the call is in flight, the call reports STALE_OWNERSHIP and stops. That is
  * how a Project A operation is prevented from mutating Project B.
  *
+ * Editor coordination (fix(workspace): coordinate agent tools with editor
+ * state): source-dependent tools flush the existing editor persistence layer
+ * before they read, and mutating tools invalidate the affected editor buffers
+ * afterwards. Both reuse the mechanisms that already exist — `flushAll` and
+ * `clearFile` from useEditorPersistence, reached through refs that ProjectShell
+ * populates. No second editor store is introduced.
+ *
  * No provider calls, no BYOK, no autonomous loop. The M3.7 execution loop and
  * the M3.9 provider adapters will consume `invoke`; they do not exist yet.
  */
@@ -56,6 +63,16 @@ export interface UseAgentToolsOptions {
   onRunProject: () => Promise<void>;
   /** Stop the project. Supplied by useRuntime. */
   onStopProject: () => Promise<void>;
+  /**
+   * Flushes pending editor drafts to IndexedDB. This is the editor's existing
+   * `flushAll`, exposed by EditorPanel. Resolves false when a save failed.
+   */
+  onFlushEditor: () => Promise<boolean>;
+  /**
+   * Drops editor buffers for paths the agent mutated. This is EditorPanel's
+   * wrapper around the editor's existing `clearFile`.
+   */
+  onInvalidateEditorPaths: (paths: string[]) => void;
 }
 
 export function useAgentTools(options: UseAgentToolsOptions): AgentToolsApi {
@@ -68,6 +85,8 @@ export function useAgentTools(options: UseAgentToolsOptions): AgentToolsApi {
     onRefreshFiles,
     onRunProject,
     onStopProject,
+    onFlushEditor,
+    onInvalidateEditorPaths,
   } = options;
 
   /** Bumped on every real project change. Stale calls must stop. */
@@ -91,6 +110,10 @@ export function useAgentTools(options: UseAgentToolsOptions): AgentToolsApi {
   runProjectRef.current = onRunProject;
   const stopProjectRef = useRef(onStopProject);
   stopProjectRef.current = onStopProject;
+  const flushEditorRef = useRef(onFlushEditor);
+  flushEditorRef.current = onFlushEditor;
+  const invalidateEditorPathsRef = useRef(onInvalidateEditorPaths);
+  invalidateEditorPathsRef.current = onInvalidateEditorPaths;
 
   const invalidateProject = useCallback(() => {
     generationRef.current += 1;
@@ -115,6 +138,20 @@ export function useAgentTools(options: UseAgentToolsOptions): AgentToolsApi {
         projectId: owner,
 
         ownsCall,
+
+        // Reuses the editor's own flushAll. A stale call must not force the
+        // user's drafts to disk on behalf of a project it no longer owns, so
+        // it reports success without flushing; the handler's own ownership
+        // re-check then stops the call.
+        flushEditor: async () => {
+          if (!ownsCall()) return true;
+          return flushEditorRef.current();
+        },
+
+        invalidateEditorPaths: (paths: string[]) => {
+          if (!ownsCall()) return;
+          invalidateEditorPathsRef.current(paths);
+        },
 
         refreshFiles: async () => {
           if (!ownsCall()) return;

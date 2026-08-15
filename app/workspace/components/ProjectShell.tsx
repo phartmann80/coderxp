@@ -24,6 +24,11 @@
  * authoritative file list, the command controller, and the runtime. Nothing
  * invokes those tools yet — the execution loop is M3.7 and provider adapters
  * are M3.9. No layout change.
+ *
+ * fix(workspace): coordinate agent tools with editor state — passes the
+ * existing flushAllRef and a new invalidatePathsRef into useAgentTools, so
+ * agent tools read flushed source and cannot be overwritten afterwards by a
+ * stale editor buffer. Both refs are filled by EditorPanel.
  */
 
 import { useMemo, useState, useCallback, useRef } from "react";
@@ -140,6 +145,10 @@ export function ProjectShell({
   // Ref to hold the flushAll function from EditorPanel's persistence hook.
   const flushAllRef = useRef<(() => Promise<boolean>) | null>(null);
 
+  // Ref to hold EditorPanel's buffer-invalidation function, used by the agent
+  // tool bridge after a mutation.
+  const invalidatePathsRef = useRef<((paths: string[]) => void) | null>(null);
+
   const runtime = useRuntime(project.id, files, async () => {
     return flushAllRef.current ? flushAllRef.current() : Promise.resolve(true);
   }, project.templateId);
@@ -166,6 +175,13 @@ export function ProjectShell({
     onRefreshFiles,
     onRunProject: runtime.run,
     onStopProject: runtime.stop,
+    // Same flush the runtime and the command panel already use. When no editor
+    // is mounted there is nothing to flush, which is a success, not a failure.
+    onFlushEditor: async () =>
+      flushAllRef.current ? flushAllRef.current() : true,
+    onInvalidateEditorPaths: (paths) => {
+      invalidatePathsRef.current?.(paths);
+    },
   });
 
   // Handle running a command from the CommandPanel.
@@ -639,6 +655,7 @@ export function ProjectShell({
               onBack={onBack}
               projectOperationPending={projectOperationPending}
               flushAllRef={flushAllRef}
+              invalidatePathsRef={invalidatePathsRef}
             />
           </div>
           {/* Runtime panel: Output + Preview */}

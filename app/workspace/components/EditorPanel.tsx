@@ -22,6 +22,16 @@
  *
  * State reset on project switch is handled by the parent via React key,
  * so this component can safely initialize state from props.
+ *
+ * fix(workspace): coordinate agent tools with editor state
+ *
+ * Exposes `invalidatePathsRef` alongside the existing `flushAllRef`. When an
+ * agent tool mutates a file, the parent calls it with the affected paths; this
+ * component then drops the per-file buffer through the existing
+ * `persistence.clearFile`, clears the content cache, and forces the next load
+ * to come from IndexedDB. Without this, `seedBuffer` early-returns on an
+ * existing buffer and the content cache is `has`-guarded, so an open tab would
+ * keep its pre-agent buffer and could debounce it back over the agent's write.
  */
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
@@ -47,6 +57,12 @@ interface EditorPanelProps {
   projectOperationPending: boolean;
   /** Ref to receive the flushAll function for runtime use. */
   flushAllRef: RefObject<(() => Promise<boolean>) | null>;
+  /**
+   * Ref to receive the editor-invalidation function for agent tool use.
+   * Called with the paths an agent mutated so their buffers and cached
+   * contents are dropped and reloaded from authoritative storage.
+   */
+  invalidatePathsRef: RefObject<((paths: string[]) => void) | null>;
 }
 
 /** Cache of file contents keyed by path, to avoid re-reading IndexedDB. */
@@ -55,7 +71,7 @@ type ContentCache = Map<string, string>;
 /** Load error per path. */
 type LoadErrorMap = Map<string, string>;
 
-export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, onBack, projectOperationPending, flushAllRef }: EditorPanelProps) {
+export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, onBack, projectOperationPending, flushAllRef, invalidatePathsRef }: EditorPanelProps) {
   const persistence = useEditorPersistence(project.id, onProjectUpdate);
 
   // Sanitize initial openTabs and activeFile from project metadata.
@@ -110,10 +126,17 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
   const contentCacheRef = useRef<ContentCache>(new Map());
   const processedRequestRef = useRef<number>(-1);
 
+  // Paths an agent mutated. Until one is reloaded from IndexedDB it must not
+  // be served from the content cache or seeded from the `files` prop, because
+  // either may still describe the pre-mutation version.
+  const forcedReloadRef = useRef<Set<string>>(new Set());
+  const [reloadToken, setReloadToken] = useState(0);
+
   // Seed initial buffers from files array (persisted file records).
   useEffect(() => {
     for (const f of files) {
       if (f.kind === "file" && f.contents !== undefined) {
+        if (forcedReloadRef.current.has(f.path)) continue;
         if (!contentCacheRef.current.has(f.path)) {
           contentCacheRef.current.set(f.path, f.contents);
           persistence.seedBuffer(f.path, f.contents);
@@ -121,6 +144,41 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
       }
     }
   }, [files, persistence]);
+
+  /**
+   * Drops every trace of the given paths from editor state: the pending
+   * debounce and per-file buffer (via the existing clearFile), the content
+   * cache, and the rendered contents. The next render reloads them from
+   * IndexedDB, which the agent has already made authoritative.
+   *
+   * This is what prevents a pre-agent buffer from later debouncing back over
+   * an agent write.
+   */
+  const invalidatePaths = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      for (const path of paths) {
+        forcedReloadRef.current.add(path);
+        persistence.clearFile(path);
+        contentCacheRef.current.delete(path);
+      }
+      setFileContents((prev) => {
+        const next = new Map(prev);
+        for (const path of paths) next.delete(path);
+        return next;
+      });
+      setReloadToken((n) => n + 1);
+    },
+    [persistence],
+  );
+
+  // Expose invalidation to the parent so the agent tool bridge can call it.
+  useEffect(() => {
+    invalidatePathsRef.current = invalidatePaths;
+    return () => {
+      invalidatePathsRef.current = null;
+    };
+  }, [invalidatePaths, invalidatePathsRef]);
 
   // If initial sanitization changed the metadata, persist the repaired state.
   useEffect(() => {
@@ -165,17 +223,21 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
 
     let cancelled = false;
 
+    // An agent mutated this path: neither the cache nor the `files` prop is
+    // trustworthy for it, so go straight to IndexedDB.
+    const forced = forcedReloadRef.current.has(activeFile);
+
     async function loadContent() {
       // Check cache first.
       const cached = contentCacheRef.current.get(activeFile!);
-      if (cached !== undefined) {
+      if (!forced && cached !== undefined) {
         setFileContents((prev) => new Map(prev).set(activeFile!, cached));
         return;
       }
 
       // Check if we have it in the files array (persisted records).
       const fileRecord = files.find((f) => f.path === activeFile!);
-      if (fileRecord && fileRecord.kind === "file" && fileRecord.contents !== undefined) {
+      if (!forced && fileRecord && fileRecord.kind === "file" && fileRecord.contents !== undefined) {
         const contents = fileRecord.contents;
         contentCacheRef.current.set(activeFile!, contents);
         persistence.seedBuffer(activeFile!, contents);
@@ -188,6 +250,9 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
         const entry = await getEntry(project.id, activeFile!);
         if (!cancelled && entry.kind === "file") {
           const contents = entry.contents ?? "";
+          // Cleared only after the authoritative read succeeded. A failed read
+          // leaves the path forced, so it is never served from a stale cache.
+          forcedReloadRef.current.delete(activeFile!);
           contentCacheRef.current.set(activeFile!, contents);
           persistence.seedBuffer(activeFile!, contents);
           setFileContents((prev) => new Map(prev).set(activeFile!, contents));
@@ -214,7 +279,9 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
     return () => {
       cancelled = true;
     };
-  }, [activeFile, project.id, files, persistence]);
+    // reloadToken re-runs this effect after an agent mutation, so the open tab
+    // reloads even when activeFile and files are unchanged.
+  }, [activeFile, project.id, files, persistence, reloadToken]);
 
   // Expose flushAll to the parent via ref so the runtime can flush before Run.
   useEffect(() => {
@@ -266,6 +333,7 @@ export function EditorPanel({ project, files, fileOpenRequest, onProjectUpdate, 
 
       persistence.clearFile(path);
       contentCacheRef.current.delete(path);
+      forcedReloadRef.current.delete(path);
       setFileContents((prev) => {
         const next = new Map(prev);
         next.delete(path);

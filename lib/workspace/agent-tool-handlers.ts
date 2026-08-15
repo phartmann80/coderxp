@@ -26,6 +26,18 @@
  * project switch mid-call cannot let a Project A operation touch Project B.
  * Losing ownership is a normal outcome, reported as STALE_OWNERSHIP, not an
  * error state.
+ *
+ * Editor coordination. The editor keeps a debounced in-memory buffer, so
+ * IndexedDB is only authoritative once that buffer is flushed. Every
+ * source-dependent tool therefore flushes the editor first, through the
+ * existing useEditorPersistence.flushAll:
+ *
+ *   editor draft -> flush to IndexedDB -> agent read or mutation
+ *
+ * A failed flush aborts the tool call rather than letting the agent act on
+ * source it cannot see. After a mutation the affected paths are invalidated in
+ * the editor, so an open tab cannot later debounce a pre-agent buffer back
+ * over the agent's write.
  */
 
 import {
@@ -97,6 +109,21 @@ export interface AgentToolContext {
    * Re-checked after every await that precedes a mutation.
    */
   ownsCall: () => boolean;
+
+  /**
+   * Flush pending editor drafts into IndexedDB, so a source-dependent tool
+   * observes the newest content. Wraps the existing
+   * useEditorPersistence.flushAll; resolves false when a draft could not be
+   * saved, in which case the caller must not proceed.
+   */
+  flushEditor: () => Promise<boolean>;
+
+  /**
+   * Drop the editor's cached buffer for paths the agent just changed, so an
+   * open tab reloads from IndexedDB instead of debouncing a stale pre-agent
+   * buffer back over the mutation. Paths are the post-mutation paths.
+   */
+  invalidateEditorPaths: (paths: string[]) => void;
 
   /** Refresh the workspace's authoritative file list after a mutation. */
   refreshFiles: () => Promise<void>;
@@ -188,12 +215,52 @@ function truncateToBytes(text: string, maxBytes: number): {
 }
 
 /**
+ * Flushes editor drafts before a source-dependent operation.
+ *
+ * Returns a failure result when a draft could not be saved: acting on source
+ * the agent cannot see would either read a stale file or overwrite the user's
+ * unsaved work. Ownership is re-checked afterwards because flushing awaits.
+ */
+async function flushBeforeSource<T>(
+  ctx: AgentToolContext,
+): Promise<AgentToolResult<T> | null> {
+  let flushed: boolean;
+  try {
+    flushed = await ctx.flushEditor();
+  } catch {
+    flushed = false;
+  }
+  if (!flushed) {
+    return toolErr<T>(
+      "EDITOR_FLUSH_FAILED",
+      "Unsaved editor changes could not be saved, so the project source is not " +
+        "current. The tool did not run.",
+    );
+  }
+  if (!ctx.ownsCall()) return stale<T>();
+  return null;
+}
+
+/**
  * Runs the post-mutation pipeline. Ownership is re-checked before the sync so
  * a switch between the write and the sync cannot push Project A source into a
  * container now holding Project B.
+ *
+ * `changed` lists the paths the agent touched. Their editor buffers are
+ * dropped so a tab open on one of them reloads the authoritative version
+ * rather than debouncing its pre-agent buffer back over the mutation.
+ *
+ * Order matters: the refresh runs first. Dropping a buffer while the workspace
+ * still holds the pre-mutation file list would make the editor reload the old
+ * contents from that list and cache them again, reinstating the very staleness
+ * this is meant to remove.
  */
-async function afterMutation(ctx: AgentToolContext): Promise<void> {
+async function afterMutation(
+  ctx: AgentToolContext,
+  changed: string[],
+): Promise<void> {
   await ctx.refreshFiles();
+  ctx.invalidateEditorPaths(changed);
   if (!ctx.ownsCall()) return;
   await ctx.syncProjectSource();
 }
@@ -261,6 +328,9 @@ export async function readFile(
   const normalized = normalizePath<ReadFileData>(params?.path, "path");
   if (isResult<ReadFileData>(normalized)) return normalized;
 
+  const unflushed = await flushBeforeSource<ReadFileData>(ctx);
+  if (unflushed) return unflushed;
+
   let entry: WorkspaceFileRecord;
   try {
     entry = await getEntry(ctx.projectId, normalized.path);
@@ -300,6 +370,11 @@ export async function readFiles(
       `paths accepts at most ${MAX_READ_FILES_BATCH} entries per call.`,
     );
   }
+
+  // Flushed once for the batch. readFile flushes too, but by then nothing is
+  // dirty, so the repeat is a no-op rather than a second round of saves.
+  const unflushed = await flushBeforeSource<ReadFilesData>(ctx);
+  if (unflushed) return unflushed;
 
   const files: ReadFilesEntry[] = [];
   for (const raw of params.paths) {
@@ -344,6 +419,11 @@ export async function createFile(
     );
   }
 
+  // Flushed because the existence check is source-dependent: a draft saved
+  // between the check and the write would otherwise be clobbered.
+  const unflushed = await flushBeforeSource<WriteFileData>(ctx);
+  if (unflushed) return unflushed;
+
   // create_file must not silently overwrite; write_file is the tool for that.
   let exists = false;
   try {
@@ -367,7 +447,7 @@ export async function createFile(
   }
   if (!ctx.ownsCall()) return stale<WriteFileData>();
 
-  await afterMutation(ctx);
+  await afterMutation(ctx, [normalized.path]);
   return toolOk({ path: normalized.path, created: true, bytes: byteLength(contents) });
 }
 
@@ -391,6 +471,11 @@ export async function writeFile(
     );
   }
 
+  // Flushed first so a pending draft cannot land on top of this write a few
+  // hundred milliseconds later.
+  const unflushed = await flushBeforeSource<WriteFileData>(ctx);
+  if (unflushed) return unflushed;
+
   let existed = false;
   try {
     const existing = await getEntry(ctx.projectId, normalized.path);
@@ -413,7 +498,7 @@ export async function writeFile(
   }
   if (!ctx.ownsCall()) return stale<WriteFileData>();
 
-  await afterMutation(ctx);
+  await afterMutation(ctx, [normalized.path]);
   return toolOk({
     path: normalized.path,
     created: !existed,
@@ -438,6 +523,12 @@ export async function applyPatch(
   if (!Array.isArray(params.edits) || params.edits.length === 0) {
     return toolErr<ApplyPatchData>("INVALID_PARAMS", "edits must be a non-empty array.");
   }
+
+  // Critical for patching: edits match against what is read here. Reading a
+  // pre-draft version would either fail to match or silently discard the
+  // user's unsaved edits on write.
+  const unflushed = await flushBeforeSource<ApplyPatchData>(ctx);
+  if (unflushed) return unflushed;
 
   let entry: WorkspaceFileRecord;
   try {
@@ -507,7 +598,7 @@ export async function applyPatch(
   }
   if (!ctx.ownsCall()) return stale<ApplyPatchData>();
 
-  await afterMutation(ctx);
+  await afterMutation(ctx, [normalized.path]);
   return toolOk({
     path: normalized.path,
     editsApplied: params.edits.length,
@@ -538,6 +629,22 @@ export async function renameFile(
   const to = normalizePath<RenameFileData>(params?.to, "to");
   if (isResult<RenameFileData>(to)) return to;
 
+  // Flushed so the moved file carries the user's newest content, not the last
+  // debounced save.
+  const unflushed = await flushBeforeSource<RenameFileData>(ctx);
+  if (unflushed) return unflushed;
+
+  // Read before the rename: a directory rename moves its descendants too, and
+  // every one of those old paths has to be invalidated in the editor.
+  const before = await readEntries<RenameFileData>(ctx);
+  if (isResult<RenameFileData>(before)) return before;
+  if (!ctx.ownsCall()) return stale<RenameFileData>();
+
+  const fromPrefix = `${from.path}/`;
+  const moved = before
+    .map((entry) => entry.path)
+    .filter((path) => path === from.path || path.startsWith(fromPrefix));
+
   try {
     await renameEntry(ctx.projectId, from.path, to.path);
   } catch (err) {
@@ -548,7 +655,14 @@ export async function renameFile(
   }
   if (!ctx.ownsCall()) return stale<RenameFileData>();
 
-  await afterMutation(ctx);
+  // Both ends are invalidated: the old path no longer exists, and the new one
+  // must not inherit a buffer left over from a previous file at that path.
+  const affected = [
+    ...moved,
+    ...moved.map((path) => to.path + path.slice(from.path.length)),
+  ];
+
+  await afterMutation(ctx, affected);
   return toolOk({ from: from.path, to: to.path });
 }
 
@@ -562,15 +676,21 @@ export async function deleteFile(
   const normalized = normalizePath<DeleteFileData>(params?.path, "path");
   if (isResult<DeleteFileData>(normalized)) return normalized;
 
+  // Flushed first: a pending draft for the target would otherwise land in
+  // IndexedDB after the delete and resurrect the file.
+  const unflushed = await flushBeforeSource<DeleteFileData>(ctx);
+  if (unflushed) return unflushed;
+
   // Counted before the delete so the report reflects what was actually removed.
   const before = await readEntries<DeleteFileData>(ctx);
   if (isResult<DeleteFileData>(before)) return before;
   if (!ctx.ownsCall()) return stale<DeleteFileData>();
 
   const prefix = `${normalized.path}/`;
-  const removed = before.filter(
-    (entry) => entry.path === normalized.path || entry.path.startsWith(prefix),
-  ).length;
+  const removedPaths = before
+    .map((entry) => entry.path)
+    .filter((path) => path === normalized.path || path.startsWith(prefix));
+  const removed = removedPaths.length;
 
   if (removed === 0) {
     return toolErr<DeleteFileData>("NOT_FOUND", `${normalized.path} does not exist.`);
@@ -583,7 +703,7 @@ export async function deleteFile(
   }
   if (!ctx.ownsCall()) return stale<DeleteFileData>();
 
-  await afterMutation(ctx);
+  await afterMutation(ctx, removedPaths);
   return toolOk({ path: normalized.path, removed });
 }
 
@@ -615,6 +735,16 @@ export async function runCommand(
 
   const args = (params.args ?? []).map((arg) => String(arg));
   const cwd = params.cwd ?? WORKSPACE_PROJECT_ROOT;
+
+  // Any command may read project source, and which ones do is not knowable
+  // from the command line, so every command flushes. The alternative is a
+  // build or test run that silently uses pre-draft files.
+  const unflushed = await flushBeforeSource<RunCommandData>(ctx);
+  if (unflushed) return unflushed;
+
+  // Drafts saved by the flush must reach the container before the command
+  // observes the tree.
+  await ctx.syncProjectSource();
 
   // Checked before the spawn so an already-stale call starts no process at all.
   if (!ctx.ownsCall()) return stale<RunCommandData>();
@@ -736,6 +866,12 @@ export async function runProject(
   const missing = requireProject<RunProjectData>(ctx);
   if (missing) return missing;
 
+  // useRuntime already flushes before it runs. Flushing here as well keeps the
+  // guarantee a property of the tool layer rather than of one caller, and the
+  // existing flush is idempotent when nothing is dirty.
+  const unflushed = await flushBeforeSource<RunProjectData>(ctx);
+  if (unflushed) return unflushed;
+
   try {
     await ctx.runProject();
   } catch (err) {
@@ -830,6 +966,12 @@ async function runPackageScript(
 ): Promise<AgentToolResult<ScriptRunData>> {
   const missing = requireProject<ScriptRunData>(ctx);
   if (missing) return missing;
+
+  // package.json itself may be open and dirty, so the script lookup has to see
+  // the flushed version. runCommand flushes again; a second flush with nothing
+  // pending is a no-op.
+  const unflushed = await flushBeforeSource<ScriptRunData>(ctx);
+  if (unflushed) return unflushed;
 
   const pkg = await readPackageScripts(ctx);
   if (isResult<ScriptRunData>(pkg)) return pkg;

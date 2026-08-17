@@ -29,6 +29,10 @@
  * existing flushAllRef and a new invalidatePathsRef into useAgentTools, so
  * agent tools read flushed source and cannot be overwritten afterwards by a
  * stale editor buffer. Both refs are filled by EditorPanel.
+ *
+ * M3.6: wires the permission controller and the shared project generation, and
+ * passes the mode selector and approval state down to the agent panel. Nothing
+ * here executes a tool; approving only resolves an approval object.
  */
 
 import { useMemo, useState, useCallback, useRef } from "react";
@@ -52,6 +56,8 @@ import { useCommands } from "../hooks/useCommands";
 import { useAgentChat } from "../hooks/useAgentChat";
 import { useFileSync } from "../hooks/useFileSync";
 import { useAgentTools } from "../hooks/useAgentTools";
+import { useAgentPermissions } from "../hooks/useAgentPermissions";
+import { useProjectGeneration } from "../hooks/useProjectGeneration";
 import { getTerminal } from "@/lib/workspace/terminal";
 import { getCommandController } from "@/lib/workspace/command-controller";
 import {
@@ -163,12 +169,28 @@ export function ProjectShell({
     onRefreshFiles,
   );
 
+  // M3.6: one generation counter, shared by the tool bridge and the permission
+  // controller. Two counters could disagree, and an approval would then be able
+  // to outlive the generation it was meant to authorize.
+  const projectGeneration = useProjectGeneration(project.id);
+
+  const permissions = useAgentPermissions({
+    projectId: project.id,
+    generation: projectGeneration.generation,
+  });
+
   // M3.5 tool bridge. Bound here because this is where the authoritative file
   // list, the runtime, and the command controller already meet. Held for the
   // M3.7 execution loop; no caller invokes it in this milestone.
+  //
+  // M3.6 routes every agent-requested call through `permissions.controller`
+  // first, so the execution loop cannot reach a handler without a decision.
   useAgentTools({
     projectId: project.id,
     templateId: project.templateId,
+    controller: permissions.controller,
+    getGeneration: projectGeneration.getGeneration,
+    invalidateGeneration: projectGeneration.invalidate,
     runtimeState: runtime.state,
     previewUrl: runtime.previewUrl,
     runtimeError: runtime.error,
@@ -681,6 +703,11 @@ export function ProjectShell({
               onChatSend={chat.send}
               onChatCancel={chat.cancel}
               onChatClear={chat.clear}
+              permissionMode={permissions.mode}
+              onPermissionModeChange={permissions.setMode}
+              pendingApprovals={permissions.pending}
+              onApproveRequest={permissions.approve}
+              onDenyRequest={permissions.deny}
             />
           </div>
         </div>

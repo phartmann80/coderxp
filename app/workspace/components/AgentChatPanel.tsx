@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Agent chat panel for CoderXP M3.3.
+ * Agent chat panel for CoderXP M3.3 + M3.6.
  *
  * Renders the provider-independent transcript and the composer.
  *
@@ -11,6 +11,11 @@
  *   dependency and no dangerouslySetInnerHTML anywhere in this file.
  * - When no transport is connected, the panel says so and no reply is
  *   fabricated. The provider adapter lands in M3.9.
+ *
+ * M3.6 adds the permission mode selector and the pending-approval cards. Both
+ * are driven by the real controller state passed down from ProjectShell. The
+ * panel never executes a tool; approving resolves an approval object, and the
+ * M3.7 execution loop is what resumes the call.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -20,6 +25,14 @@ import {
   type AgentBlock,
   type AgentMessage,
 } from "@/lib/workspace/agent-protocol";
+import type {
+  AgentApprovalRequest,
+  AgentPermissionMode,
+} from "@/lib/workspace/agent-permissions";
+import {
+  AgentApprovalList,
+  AgentModeSelector,
+} from "./AgentApprovalCard";
 
 /** Composer height ceiling so the workspace layout does not jump. */
 const COMPOSER_MAX_HEIGHT_PX = 120;
@@ -37,6 +50,18 @@ interface AgentChatPanelProps {
   onCancel: () => void;
   /** Start a new conversation. */
   onClear: () => void;
+  /** Current permission mode from the controller. */
+  permissionMode: AgentPermissionMode;
+  /** Change the mode. Persisted per project by useAgentPermissions. */
+  onPermissionModeChange: (mode: AgentPermissionMode) => void;
+  /**
+   * Real pending approvals for the open project, oldest first. An empty array
+   * renders nothing; the panel does not invent a request for demonstration.
+   */
+  pendingApprovals: AgentApprovalRequest[];
+  /** Resolve one exact pending approval by id. */
+  onApproveRequest: (approvalId: string) => void;
+  onDenyRequest: (approvalId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,7 +73,6 @@ type TextSegment =
   | { kind: "inline-code"; text: string }
   | { kind: "fence"; text: string; lang: string };
 
-/** Splits a body into fenced-code and non-fenced segments. */
 function splitFences(text: string): TextSegment[] {
   const segments: TextSegment[] = [];
   const fence = /```([\w-]*)\n?([\s\S]*?)```/g;
@@ -63,14 +87,12 @@ function splitFences(text: string): TextSegment[] {
     cursor = match.index + match[0].length;
   }
 
-  // An unterminated fence stays plain text rather than swallowing the rest.
   if (cursor < text.length) {
     segments.push({ kind: "plain", text: text.slice(cursor) });
   }
   return segments;
 }
 
-/** Splits a non-fenced run into plain and inline-code segments. */
 function splitInlineCode(text: string): TextSegment[] {
   const segments: TextSegment[] = [];
   const inline = /`([^`\n]+)`/g;
@@ -300,6 +322,11 @@ export function AgentChatPanel({
   onSend,
   onCancel,
   onClear,
+  permissionMode,
+  onPermissionModeChange,
+  pendingApprovals,
+  onApproveRequest,
+  onDenyRequest,
 }: AgentChatPanelProps) {
   const [input, setInput] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
@@ -311,7 +338,6 @@ export function AgentChatPanel({
     }
   }, [messages]);
 
-  // Grow with content up to the ceiling, then scroll inside the composer.
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -328,7 +354,6 @@ export function AgentChatPanel({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // Enter sends. Shift+Enter falls through so the textarea inserts a newline.
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
@@ -345,7 +370,11 @@ export function AgentChatPanel({
         <span className="text-xs text-gray-600">
           {isStreaming ? "streaming" : isConnected ? "ready" : "not connected"}
         </span>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1.5">
+          <AgentModeSelector
+            mode={permissionMode}
+            setMode={onPermissionModeChange}
+          />
           {isStreaming && (
             <button
               onClick={onCancel}
@@ -369,7 +398,7 @@ export function AgentChatPanel({
         </div>
       </div>
 
-      {/* Truthful connection state — never a fabricated response */}
+      {/* Truthful connection state */}
       {!isConnected && (
         <div className="px-3 py-1.5 border-b border-gray-800/60 bg-gray-900/30">
           <p className="text-xs text-gray-500">
@@ -389,6 +418,14 @@ export function AgentChatPanel({
           messages.map((message) => <MessageView key={message.id} message={message} />)
         )}
       </div>
+
+      {/* Pending approvals */}
+      <AgentApprovalList
+        pending={pendingApprovals}
+        onApprove={onApproveRequest}
+        onDeny={onDenyRequest}
+        onCancel={() => {}}
+      />
 
       {/* Composer */}
       <div className="flex items-end gap-1.5 px-3 py-1.5 border-t border-gray-800 bg-gray-900/50">

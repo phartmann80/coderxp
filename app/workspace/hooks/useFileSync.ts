@@ -75,25 +75,22 @@ export function useFileSync(
   const [error, setError] = useState<string | null>(null);
 
   const onFilesChangedRef = useRef(onFilesChanged);
-  onFilesChangedRef.current = onFilesChanged;
-
-  /** Bumped on project switch and on each new syncNow. Stale passes must no-op. */
   const generationRef = useRef(0);
-  /** Last projectId that owned this hook instance. */
   const projectIdRef = useRef(projectId);
   const commandsRef = useRef(commands);
-  commandsRef.current = commands;
-  /** Command ids already observed; seeded so leftover history does not auto-sync. */
   const completedSeenRef = useRef<Set<string>>(new Set(commands.map((c) => c.id)));
   const prevRuntimeRef = useRef(runtimeState);
+
+  useEffect(() => {
+    onFilesChangedRef.current = onFilesChanged;
+    commandsRef.current = commands;
+  });
 
   const invalidateProject = useCallback(() => {
     generationRef.current += 1;
     setStatus("idle");
     setLastResult(null);
     setError(null);
-    // Mark every currently known command as seen so leftover singleton
-    // history cannot start a sync for the newly selected project.
     const seen = new Set<string>();
     for (const command of commandsRef.current) {
       seen.add(command.id);
@@ -101,8 +98,6 @@ export function useFileSync(
     completedSeenRef.current = seen;
   }, []);
 
-  // Real project switches only. Do not list status / lastResult / syncedCount
-  // here — a sync-state rerender must not self-invalidate an active pass.
   useEffect(() => {
     if (projectIdRef.current === projectId) return;
     projectIdRef.current = projectId;
@@ -111,16 +106,12 @@ export function useFileSync(
 
   const syncNow = useCallback(async () => {
     if (!projectId) return;
-    // Preview may be idle; the shared container still holds the project.
     if (!isProjectPresentInContainer()) return;
 
     const gen = ++generationRef.current;
     setStatus("syncing");
     setError(null);
 
-    // Checked inside the sync before every write, not only on return: the
-    // container is shared, so a project switch mid-pass must not persist
-    // the newly mounted project's files under this projectId.
     const ownsSync = () => gen === generationRef.current;
 
     try {
@@ -138,8 +129,6 @@ export function useFileSync(
     }
   }, [projectId]);
 
-  // Auto-sync after a newly completed command even when runtime is idle,
-  // as long as the active project exists in the shared WebContainer.
   useEffect(() => {
     let sawNew = false;
     for (const command of commands) {
@@ -149,6 +138,7 @@ export function useFileSync(
       sawNew = true;
     }
     if (!sawNew) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void syncNow();
   }, [commands, syncNow]);
 
@@ -156,7 +146,6 @@ export function useFileSync(
     const prev = prevRuntimeRef.current;
     prevRuntimeRef.current = runtimeState;
 
-    // Also sync after Run completes (reached running, or returned to idle).
     const runFinished =
       (prev === "starting" || prev === "installing") && runtimeState === "running";
     const runStopped = prev === "running" && runtimeState === "idle";

@@ -29,6 +29,10 @@ import { AgentChatPanel } from "./AgentChatPanel";
 import type { RuntimeState, OutputLine } from "@/lib/workspace/runtime";
 import type { CommandResult } from "@/lib/workspace/command-controller";
 import type { AgentMessage } from "@/lib/workspace/agent-protocol";
+import type {
+  AgentApprovalRequest,
+  AgentPermissionMode,
+} from "@/lib/workspace/agent-permissions";
 
 type PanelTab = "terminal" | "output" | "preview" | "commands" | "agent";
 
@@ -73,6 +77,12 @@ interface RuntimePanelProps {
   onChatCancel: () => void;
   /** Start a new conversation. */
   onChatClear: () => void;
+  /** M3.6 permission state, passed straight through to the agent panel. */
+  permissionMode: AgentPermissionMode;
+  onPermissionModeChange: (mode: AgentPermissionMode) => void;
+  pendingApprovals: AgentApprovalRequest[];
+  onApproveRequest: (approvalId: string) => void;
+  onDenyRequest: (approvalId: string) => void;
 }
 
 export function RuntimePanel({
@@ -96,6 +106,11 @@ export function RuntimePanel({
   onChatSend,
   onChatCancel,
   onChatClear,
+  permissionMode,
+  onPermissionModeChange,
+  pendingApprovals,
+  onApproveRequest,
+  onDenyRequest,
 }: RuntimePanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>("preview");
 
@@ -184,6 +199,11 @@ export function RuntimePanel({
             onSend={onChatSend}
             onCancel={onChatCancel}
             onClear={onChatClear}
+            permissionMode={permissionMode}
+            onPermissionModeChange={onPermissionModeChange}
+            pendingApprovals={pendingApprovals}
+            onApproveRequest={onApproveRequest}
+            onDenyRequest={onDenyRequest}
           />
         )}
         {activeTab === "preview" && (

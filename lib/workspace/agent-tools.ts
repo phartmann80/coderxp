@@ -1,5 +1,5 @@
 /**
- * Agent workspace tool contracts for CoderXP M3.5.
+ * Agent workspace tool contracts for CoderXP M3.5 + M3.6.
  *
  * This module is the provider-independent description layer for the tools an
  * agent may invoke against a CoderXP project. It contains declarations only:
@@ -87,7 +87,11 @@ export type AgentToolErrorCode =
    * Pending editor drafts could not be saved, so IndexedDB is not current.
    * The tool did not run; the user's unsaved work is untouched.
    */
-  | "EDITOR_FLUSH_FAILED";
+  | "EDITOR_FLUSH_FAILED"
+  /** The requested tool is not in the registry. */
+  | "UNKNOWN_TOOL"
+  /** The permission gate denied the call. */
+  | "PERMISSION_DENIED";
 
 export interface AgentToolError {
   code: AgentToolErrorCode;

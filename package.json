@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "npx tsx scripts/test-agent-permissions.ts && npx tsx scripts/test-agent-execution-runtime.ts"
+    "test": "npx tsx scripts/test-agent-permissions.ts && npx tsx scripts/test-agent-execution-runtime.ts && npx tsx scripts/test-agent-runtime-adapter.ts"
   },
   "dependencies": {
     "@codemirror/lang-css": "6.3.1",

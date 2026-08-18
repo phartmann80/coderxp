@@ -54,33 +54,21 @@ export function useAgentExecutionRuntime(
 
   const [revision, setRevision] = useState(0);
 
-  const executeToolRef = useRef(executeTool);
-  const onEventRef = useRef(onEvent);
-  const generationRef = useRef(generation);
-  const projectIdRef = useRef(projectId);
-
-  useEffect(() => {
-    executeToolRef.current = executeTool;
-    onEventRef.current = onEvent;
-    generationRef.current = generation;
-    projectIdRef.current = projectId;
-  });
-
   const runtime = useMemo(() => {
     return new AgentExecutionRuntime({
       projectId,
       generation,
       controller,
-      executeTool: (name, params, ctx) => executeToolRef.current(name, params, ctx),
+      executeTool,
     });
-  }, [projectId, generation, controller]);
+  }, [projectId, generation, controller, executeTool]);
 
   useEffect(() => {
     return runtime.onEvent((event) => {
       setRevision((n) => n + 1);
-      onEventRef.current?.(event);
+      onEvent?.(event);
     });
-  }, [runtime]);
+  }, [runtime, onEvent]);
 
   // Sync generation changes to runtime
   useEffect(() => {

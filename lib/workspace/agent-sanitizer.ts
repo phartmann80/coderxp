@@ -266,10 +266,16 @@ export function formatUserFacingResultSummary(
       return `Command finished with exit code ${rec.exitCode ?? 0}`;
     case "stop_command":
       return `Stopped process ${sanitizeString(String(rec.commandId ?? ""))}`;
-    case "run_project":
-      return `Project started. State: ${sanitizeString(String(rec.state ?? "running"))}`;
-    case "stop_project":
-      return `Project stopped.`;
+    case "read_files":
+      return `Read ${Array.isArray(rec.files) ? rec.files.length : 0} files`;
+    case "read_command_output":
+      return `Read output for command ${sanitizeString(String(rec.commandId ?? ""))}`;
+    case "get_runtime_status":
+      return `Runtime state: ${sanitizeString(String(rec.state ?? "unknown"))}`;
+    case "run_build":
+      return `Build ${rec.success ? "succeeded" : "failed"} (exit code ${rec.exitCode ?? 0})`;
+    case "run_tests":
+      return `Tests ${rec.success ? "passed" : "failed"} (exit code ${rec.exitCode ?? 0})`;
     default:
       return summarizeToolCall(toolName, rec);
   }

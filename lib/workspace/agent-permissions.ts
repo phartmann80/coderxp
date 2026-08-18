@@ -228,8 +228,8 @@ export function sanitizeString(str: string): string {
   sanitized = sanitized.replace(/([?&](?:token|password|passwd|secret|api_?key|access_?token|auth|cred|bearer)=)[^&\s]+/gi, "$1[REDACTED]");
   // Redact Authorization headers and Bearer tokens
   sanitized = sanitized.replace(/(Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "$1[REDACTED]");
-  // Redact flag parameters like --token=secret, --password secret, --api-key=123
-  sanitized = sanitized.replace(/(--(?:token|password|secret|api-key|auth|credentials)=)[^\s]+/gi, "$1[REDACTED]");
+  // Redact flag and assignment parameters like --token=secret, token=secret, --password secret, --api-key=123
+  sanitized = sanitized.replace(/((?:--)?(?:token|password|passwd|secret|api_?key|auth|credentials)=)[^\s'";]+/gi, "$1[REDACTED]");
   // Redact common secret key prefixes (e.g. ghp_..., sk_live_..., sk_test_...)
   sanitized = sanitized.replace(/(?:ghp|sk_live|sk_test|xox[baprs])-[A-Za-z0-9_]+/gi, "[REDACTED_TOKEN]");
   return sanitized;

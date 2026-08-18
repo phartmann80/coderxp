@@ -299,7 +299,19 @@ export class AgentExecutionRuntime {
   // -------------------------------------------------------------------------
 
   async drain(): Promise<void> {
-    await this.drainQueue();
+    while (this.queue.length > 0 || this.isDraining) {
+      await this.drainQueue();
+      await new Promise<void>((resolve) => queueMicrotask(() => resolve()));
+      if (this.activeHead !== null) {
+        const head = this.attempts.get(this.activeHead);
+        if (head && head.state === "awaiting-approval") {
+          break;
+        }
+      }
+      if (this.queue.length === 0 && !this.isDraining) {
+        break;
+      }
+    }
   }
 
   private scheduleNextDrain(): void {

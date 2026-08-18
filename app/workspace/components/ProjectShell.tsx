@@ -58,6 +58,7 @@ import { useFileSync } from "../hooks/useFileSync";
 import { useAgentTools } from "../hooks/useAgentTools";
 import { useAgentPermissions } from "../hooks/useAgentPermissions";
 import { useProjectGeneration } from "../hooks/useProjectGeneration";
+import { useAgentExecutionRuntime } from "../hooks/useAgentExecutionRuntime";
 import { getTerminal } from "@/lib/workspace/terminal";
 import { getCommandController } from "@/lib/workspace/command-controller";
 import {
@@ -181,11 +182,11 @@ export function ProjectShell({
 
   // M3.5 tool bridge. Bound here because this is where the authoritative file
   // list, the runtime, and the command controller already meet. Held for the
-  // M3.7 execution loop; no caller invokes it in this milestone.
+  // M3.7 execution loop.
   //
   // M3.6 routes every agent-requested call through `permissions.controller`
   // first, so the execution loop cannot reach a handler without a decision.
-  useAgentTools({
+  const tools = useAgentTools({
     projectId: project.id,
     templateId: project.templateId,
     controller: permissions.controller,
@@ -205,6 +206,42 @@ export function ProjectShell({
       invalidatePathsRef.current?.(paths);
     },
   });
+
+  // M3.7 Agent Tool Execution Runtime. ProjectShell remains the lifecycle owner.
+  const execution = useAgentExecutionRuntime({
+    projectId: project.id,
+    generation: projectGeneration.generation,
+    controller: permissions.controller,
+    executeTool: tools.executeTool,
+    onEvent: (event) => {
+      chat.handleExecutionEvent(event);
+    },
+  });
+
+  const handleApprove = useCallback(
+    (approvalId: string) => {
+      const ok = permissions.approve(approvalId);
+      if (ok) {
+        const matching = execution.attempts.find((a) => a.approvalId === approvalId);
+        if (matching) {
+          void execution.resume(matching.attemptId);
+        }
+      }
+      return ok;
+    },
+    [permissions, execution],
+  );
+
+  const handleDeny = useCallback(
+    (approvalId: string) => {
+      const matching = execution.attempts.find((a) => a.approvalId === approvalId);
+      if (matching) {
+        return execution.deny(matching.attemptId);
+      }
+      return permissions.deny(approvalId);
+    },
+    [permissions, execution],
+  );
 
   // Handle running a command from the CommandPanel.
   const handleCommandRun = async (input: string) => {
@@ -706,8 +743,8 @@ export function ProjectShell({
               permissionMode={permissions.mode}
               onPermissionModeChange={permissions.setMode}
               pendingApprovals={permissions.pending}
-              onApproveRequest={permissions.approve}
-              onDenyRequest={permissions.deny}
+              onApproveRequest={handleApprove}
+              onDenyRequest={handleDeny}
             />
           </div>
         </div>

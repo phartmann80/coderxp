@@ -32,6 +32,7 @@ import {
 import {
   AGENT_TOOLS,
   type AgentToolDefinition,
+  type AgentToolResult,
   type RuntimeStatusData,
 } from "@/lib/workspace/agent-tools";
 import {
@@ -40,6 +41,8 @@ import {
   type AgentToolCall,
   type GatedToolOutcome,
 } from "@/lib/workspace/agent-permissions-gate";
+
+import type { ToolExecutionContext } from "@/lib/workspace/agent-execution-runtime";
 
 export interface AgentToolsApi {
   /** The tool manifest, for the M3.6 permission UI and the M3.9 adapters. */
@@ -52,6 +55,15 @@ export interface AgentToolsApi {
    * invoking the identical AgentToolCall again after the user approves.
    */
   invoke: (call: AgentToolCall) => Promise<GatedToolOutcome>;
+  /**
+   * Direct handler executor passed to the M3.7 AgentExecutionRuntime.
+   * Runs inside gateAndInvoke() under ownership checks.
+   */
+  executeTool: (
+    name: string,
+    params: unknown,
+    context: ToolExecutionContext,
+  ) => Promise<AgentToolResult<unknown>>;
   /** Invalidate in-flight tool calls. Only for a real project change. */
   invalidateProject: () => void;
 }
@@ -220,8 +232,20 @@ export function useAgentTools(options: UseAgentToolsOptions): AgentToolsApi {
     [buildContext],
   );
 
+  const executeTool = useCallback(
+    async (
+      name: string,
+      params: unknown,
+      context: ToolExecutionContext,
+    ): Promise<AgentToolResult<unknown>> => {
+      const generation = getGenerationRef.current();
+      return invokeAgentTool(buildContext(context.projectId, generation), name, params);
+    },
+    [buildContext],
+  );
+
   return useMemo(
-    () => ({ tools: AGENT_TOOLS, invoke, invalidateProject }),
-    [invoke, invalidateProject],
+    () => ({ tools: AGENT_TOOLS, invoke, executeTool, invalidateProject }),
+    [invoke, executeTool, invalidateProject],
   );
 }

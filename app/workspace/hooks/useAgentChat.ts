@@ -26,6 +26,8 @@ import {
   type AgentMessage,
   type AgentTransport,
 } from "@/lib/workspace/agent-protocol";
+import { projectEventToTranscriptBlocks } from "@/lib/workspace/agent-transcript-projector";
+import type { AgentExecutionEvent } from "@/lib/workspace/agent-execution-runtime";
 
 export interface AgentChatApi {
   /** Transcript for the open project, oldest first. */
@@ -42,6 +44,8 @@ export interface AgentChatApi {
   clear: () => void;
   /** Install or remove the transport. Null means not connected. */
   setTransport: (transport: AgentTransport | null) => void;
+  /** Project execution runtime events into the active assistant message transcript. */
+  handleExecutionEvent: (event: AgentExecutionEvent) => void;
 }
 
 /** Appends a text delta to the trailing text block, or starts one. */
@@ -305,5 +309,28 @@ export function useAgentChat(projectId: string): AgentChatApi {
     setMessages([]);
   }, [invalidateStream]);
 
-  return { messages, isStreaming, isConnected, send, cancel, clear, setTransport };
+  const handleExecutionEvent = useCallback(
+    (event: AgentExecutionEvent) => {
+      setMessages((prev) => {
+        if (prev.length === 0) return prev;
+        const last = prev[prev.length - 1];
+        if (last.role !== "assistant") return prev;
+        const nextContent = projectEventToTranscriptBlocks(last.content, event);
+        const updated: AgentMessage = { ...last, content: nextContent };
+        return [...prev.slice(0, -1), updated];
+      });
+    },
+    [],
+  );
+
+  return {
+    messages,
+    isStreaming,
+    isConnected,
+    send,
+    cancel,
+    clear,
+    setTransport,
+    handleExecutionEvent,
+  };
 }

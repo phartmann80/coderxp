@@ -465,10 +465,60 @@ export class AgentPermissionController {
   }
 
   cancel(approvalId: string): boolean {
+    return this.invalidateApproval(approvalId);
+  }
+
+  /**
+   * Explicitly invalidates an exact unconsumed authorization.
+   *
+   * May ONLY invalidate an approval in "pending" or "approved" state.
+   * Cannot modify terminal/consumed states ("consumed", "denied", "cancelled", "expired").
+   *
+   * Verifies optional match criteria (projectId, generation, toolCallId, argsFingerprint)
+   * if provided.
+   *
+   * Returns true if invalidated, false otherwise.
+   */
+  invalidateApproval(
+    approvalId: string,
+    options?: {
+      projectId?: string;
+      generation?: number;
+      toolCallId?: string;
+      argsFingerprint?: string;
+    },
+  ): boolean {
     const approval = this.approvals.get(approvalId);
-    if (!approval || approval.status !== "pending") return false;
+    if (!approval) return false;
+
+    // Must be in an invalidatable (unconsumed) state
+    if (approval.status !== "pending" && approval.status !== "approved") {
+      return false;
+    }
+
+    // Verify exact match criteria if supplied
+    if (options?.projectId !== undefined && approval.projectId !== options.projectId) {
+      return false;
+    }
+    if (options?.generation !== undefined && approval.generation !== options.generation) {
+      return false;
+    }
+    if (options?.toolCallId !== undefined && approval.toolCallId !== options.toolCallId) {
+      return false;
+    }
+    if (options?.argsFingerprint !== undefined && approval.argsFingerprint !== options.argsFingerprint) {
+      return false;
+    }
+
+    // Transition status to cancelled
     approval.status = "cancelled";
-    this.pendingByCallKey.delete(callKeyOf(approval));
+
+    // Clean up callKey entry if it points to this exact approval
+    const key = callKeyOf(approval);
+    if (this.pendingByCallKey.get(key) === approval.approvalId) {
+      this.pendingByCallKey.delete(key);
+    }
+
     this.onChange?.();
     return true;
   }

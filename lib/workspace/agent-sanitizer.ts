@@ -93,15 +93,16 @@ export interface ModelFacingToolResult {
  */
 export function projectModelFacingResult(
   toolName: string,
-  result: AgentToolResult<unknown>,
+  result: AgentToolResult<unknown> | { ok: false; error?: { code?: string; message?: string } },
 ): ModelFacingToolResult {
-  if (!result.ok) {
+  if (!result || !result.ok) {
+    const err = (result as any)?.error;
     return {
       ok: false,
       tool: toolName,
       error: {
-        code: result.error.code,
-        message: truncateAndSanitize(result.error.message, 1024),
+        code: (err?.code as any) || "TOOL_ERROR",
+        message: truncateAndSanitize(err?.message || "Tool execution failed", 1024),
       },
     };
   }

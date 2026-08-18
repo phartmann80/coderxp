@@ -325,51 +325,56 @@ export class AgentExecutionRuntime {
     this.isDraining = true;
 
     try {
-      // Head-of-line blocking: if activeHead is currently awaiting-approval, approved, or running,
-      // subsequent queue items MUST wait.
-      if (this.activeHead !== null) {
-        const currentHead = this.attempts.get(this.activeHead);
-        if (
-          currentHead &&
-          (currentHead.state === "awaiting-approval" ||
-            currentHead.state === "approved" ||
-            currentHead.state === "running")
-        ) {
-          return;
+      while (this.queue.length > 0) {
+        // Head-of-line blocking: if activeHead is currently awaiting-approval, approved, or running,
+        // subsequent queue items MUST wait.
+        if (this.activeHead !== null) {
+          const currentHead = this.attempts.get(this.activeHead);
+          if (
+            currentHead &&
+            (currentHead.state === "awaiting-approval" ||
+              currentHead.state === "approved" ||
+              currentHead.state === "running")
+          ) {
+            return;
+          }
+          // Active head reached terminal state; clear it
+          this.activeHead = null;
         }
-        // Active head reached terminal state; clear it
-        this.activeHead = null;
+
+        const nextAttemptId = this.queue.shift()!;
+        const attempt = this.attempts.get(nextAttemptId);
+        if (!attempt) continue;
+
+        // If attempt reached terminal state while queued (e.g. cancelled/stale), skip to next
+        if (TERMINAL_STATES.has(attempt.state)) {
+          continue;
+        }
+
+        this.activeHead = attempt.attemptId;
+
+        // Multi-checkpoint generation fencing before gate call
+        if (
+          attempt.call.generation !== this.generation ||
+          attempt.call.projectId !== this.projectId
+        ) {
+          this.transition(attempt, "stale", {
+            toolName: attempt.call.name,
+            message: "Project or generation changed before execution.",
+          });
+          this.activeHead = null;
+          continue;
+        }
+
+        await this.runGateAndInvoke(attempt);
+
+        if (this.activeHead !== null) {
+          const currentHead = this.attempts.get(this.activeHead);
+          if (currentHead && (currentHead.state === "awaiting-approval" || currentHead.state === "running")) {
+            break;
+          }
+        }
       }
-
-      if (this.queue.length === 0) return;
-
-      const nextAttemptId = this.queue.shift()!;
-      const attempt = this.attempts.get(nextAttemptId);
-      if (!attempt) return;
-
-      // If attempt reached terminal state while queued (e.g. cancelled/stale), skip to next
-      if (TERMINAL_STATES.has(attempt.state)) {
-        this.scheduleNextDrain();
-        return;
-      }
-
-      this.activeHead = attempt.attemptId;
-
-      // Multi-checkpoint generation fencing before gate call
-      if (
-        attempt.call.generation !== this.generation ||
-        attempt.call.projectId !== this.projectId
-      ) {
-        this.transition(attempt, "stale", {
-          toolName: attempt.call.name,
-          message: "Project or generation changed before execution.",
-        });
-        this.activeHead = null;
-        this.scheduleNextDrain();
-        return;
-      }
-
-      await this.runGateAndInvoke(attempt);
     } finally {
       this.isDraining = false;
     }

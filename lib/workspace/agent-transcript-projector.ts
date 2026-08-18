@@ -1,15 +1,16 @@
 /**
- * Pure transcript projector for CoderXP M3.7 Agent Execution Runtime.
+ * Authoritative Transcript Ingestion Dispatcher & Projector for CoderXP M3.8.
  *
- * Translates append-only AgentExecutionEvents into immutable AgentBlock[] arrays
- * for rendering in the chat panel and durable transcripts.
+ * Translates multi-domain lifecycle events (orchestrator, transport, M3.7 runtime, process stream)
+ * into immutable AgentBlock[] arrays with deterministic sequence numbers and replay deduplication.
  *
  * Zero DOM, zero React, pure projection logic.
  */
 
 import type { AgentBlock } from "./agent-protocol";
 import type { AgentExecutionEvent } from "./agent-execution-runtime";
-import { formatUserFacingResultSummary, formatSafeDiagnostic } from "./agent-sanitizer";
+import type { ProcessStreamEvent } from "./agent-process-stream";
+import { formatUserFacingResultSummary } from "./agent-sanitizer";
 
 /**
  * Upserts a block into the block list by its stable ID.
@@ -26,8 +27,7 @@ function upsertBlock(blocks: readonly AgentBlock[], block: AgentBlock): AgentBlo
 }
 
 /**
- * Pure projection function that takes existing transcript blocks and a new lifecycle event,
- * returning the next immutable block list.
+ * Pure projection function that translates M3.7 execution events into AgentBlocks.
  */
 export function projectEventToTranscriptBlocks(
   blocks: readonly AgentBlock[],
@@ -133,7 +133,98 @@ export function projectEventToTranscriptBlocks(
     case "attempt:queued":
     case "attempt:approved":
     default:
-      // Internal queue/approval state changes that do not alter transcript blocks
       return [...blocks];
+  }
+}
+
+/**
+ * Projects a process stream event into transcript blocks.
+ */
+export function projectProcessEventToTranscriptBlocks(
+  blocks: readonly AgentBlock[],
+  event: ProcessStreamEvent,
+): AgentBlock[] {
+  switch (event.type) {
+    case "process:started": {
+      const block: AgentBlock = {
+        id: `start-${event.processId}`,
+        kind: "command-started",
+        commandId: event.processId,
+        command: event.data.command ?? "command",
+      };
+      return upsertBlock(blocks, block);
+    }
+
+    case "process:output": {
+      const block: AgentBlock = {
+        id: `out-${event.processId}-${blocks.length}`,
+        kind: "command-output",
+        commandId: event.processId,
+        chunk: event.data.chunk ?? "",
+        stream: "stdout",
+      };
+      return upsertBlock(blocks, block);
+    }
+
+    case "process:completed": {
+      const block: AgentBlock = {
+        id: `done-${event.processId}`,
+        kind: "command-completed",
+        commandId: event.processId,
+        exitCode: event.data.exitCode ?? 0,
+      };
+      return upsertBlock(blocks, block);
+    }
+
+    default:
+      return [...blocks];
+  }
+}
+
+/**
+ * Authoritative multi-domain transcript ingestion dispatcher.
+ * Manages deterministic monotonic sequencing and replay deduplication.
+ */
+export class TranscriptIngestionDispatcher {
+  private blocks: AgentBlock[] = [];
+  private acceptedEventIds = new Set<string>();
+  private projectionSequence = 0;
+
+  getBlocks(): AgentBlock[] {
+    return [...this.blocks];
+  }
+
+  getProjectionSequence(): number {
+    return this.projectionSequence;
+  }
+
+  ingestExecutionEvent(event: AgentExecutionEvent): { accepted: boolean; sequence: number } {
+    const eventKey = `exec:${event.attemptId}:${event.type}:${event.sequence}`;
+    if (this.acceptedEventIds.has(eventKey)) {
+      return { accepted: false, sequence: this.projectionSequence };
+    }
+
+    this.acceptedEventIds.add(eventKey);
+    this.projectionSequence++;
+    this.blocks = projectEventToTranscriptBlocks(this.blocks, event);
+    return { accepted: true, sequence: this.projectionSequence };
+  }
+
+  ingestProcessEvent(event: ProcessStreamEvent): { accepted: boolean; sequence: number } {
+    const eventKey = `proc:${event.processId}:${event.type}:${event.sequence}`;
+    if (this.acceptedEventIds.has(eventKey)) {
+      return { accepted: false, sequence: this.projectionSequence };
+    }
+
+    this.acceptedEventIds.add(eventKey);
+    this.projectionSequence++;
+    this.blocks = projectProcessEventToTranscriptBlocks(this.blocks, event);
+    return { accepted: true, sequence: this.projectionSequence };
+  }
+
+  clear(): void {
+    this.blocks = [];
+    this.acceptedEventIds.clear();
+    this.projectionSequence = 0;
   }
 }

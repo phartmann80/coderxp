@@ -22,6 +22,7 @@ import {
 } from "../lib/workspace/agent-execution-runtime";
 import { projectEventToTranscriptBlocks } from "../lib/workspace/agent-transcript-projector";
 import type { AgentBlock } from "../lib/workspace/agent-protocol";
+import type { AgentToolResult } from "../lib/workspace/agent-tools";
 
 let passCount = 0;
 
@@ -265,7 +266,7 @@ async function runAdapterTests() {
 
   // 6.2 Strict Mode double mount / effect replay does NOT double execute
   let strictExecCount = 0;
-  const strictExecutor = async () => {
+  const strictExecutor = async (): Promise<AgentToolResult<unknown>> => {
     strictExecCount++;
     return { ok: true, data: { success: true } };
   };

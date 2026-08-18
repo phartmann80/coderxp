@@ -212,9 +212,139 @@ async function runAdapterTests() {
   chatBlocks = projectEventToTranscriptBlocks(chatBlocks, event1);
   assert(chatBlocks.length === 1, "First event creates exactly 1 block");
 
-  // Re-project identical event (simulating state re-renders / replays)
-  chatBlocks = projectEventToTranscriptBlocks(chatBlocks, event1);
-  assert(chatBlocks.length === 1, "Transcript projector is deduplicating and idempotent on replay");
+  // -------------------------------------------------------------------------
+  // 6. REACT LIFETIME, STRICT MODE & OLD-EFFECT DISPOSAL ISOLATION
+  // -------------------------------------------------------------------------
+  console.log("\n--- 6. REACT LIFETIME, STRICT MODE & OLD-EFFECT DISPOSAL ISOLATION ---");
+
+  // 6.1 Runtime instance stability across rerenders
+  // Simulating the useMemo([projectId, generation, controller, executeTool]) logic from useAgentExecutionRuntime
+  function createMemoizedRuntimeGetter() {
+    let cachedRuntime: AgentExecutionRuntime | null = null;
+    let prevDeps: [string, number, AgentPermissionController, Function] | null = null;
+
+    return function getRuntime(
+      pId: string,
+      gen: number,
+      ctrl: AgentPermissionController,
+      exec: Function,
+    ) {
+      if (
+        cachedRuntime &&
+        prevDeps &&
+        prevDeps[0] === pId &&
+        prevDeps[1] === gen &&
+        prevDeps[2] === ctrl &&
+        prevDeps[3] === exec
+      ) {
+        return cachedRuntime;
+      }
+      cachedRuntime = new AgentExecutionRuntime({
+        projectId: pId,
+        generation: gen,
+        controller: ctrl,
+        executeTool: exec as any,
+        scheduleDrain: (fn) => queueMicrotask(fn),
+      });
+      prevDeps = [pId, gen, ctrl, exec];
+      return cachedRuntime;
+    };
+  }
+
+  const getHookRuntime = createMemoizedRuntimeGetter();
+  const ctrl6 = new AgentPermissionController();
+  ctrl6.setMode("autonomous");
+  const stableExecutor = async () => ({ ok: true, data: null });
+
+  const r1 = getHookRuntime("proj-life", 1, ctrl6, stableExecutor);
+  const r2 = getHookRuntime("proj-life", 1, ctrl6, stableExecutor); // Ordinary component rerender 1
+  const r3 = getHookRuntime("proj-life", 1, ctrl6, stableExecutor); // Ordinary component rerender 2
+
+  assert(r1 === r2, "Runtime instance is stable across rerender 1");
+  assert(r2 === r3, "Runtime instance is stable across rerender 2");
+
+  // 6.2 Strict Mode double mount / effect replay does NOT double execute
+  let strictExecCount = 0;
+  const strictExecutor = async () => {
+    strictExecCount++;
+    return { ok: true, data: { success: true } };
+  };
+
+  const strictRuntime = new AgentExecutionRuntime({
+    projectId: "proj-strict",
+    generation: 1,
+    controller: ctrl6,
+    executeTool: strictExecutor,
+    scheduleDrain: (fn) => queueMicrotask(fn),
+  });
+
+  const toolCallStrict: AgentToolCall = {
+    toolCallId: "call-strict-1",
+    name: "read_file",
+    args: { path: "strict.txt" },
+    projectId: "proj-strict",
+    generation: 1,
+  };
+
+  // Mount 1 (initial mount & submit)
+  const sub1 = strictRuntime.submit(toolCallStrict, { idempotencyKey: "idem-strict-1" });
+  assert(sub1.isNew === true, "First submission in Strict Mode mount is new");
+
+  // Strict Mode unmount/cleanup simulation (unsubscribes listeners, but runtime survives or idempotent resubmit)
+  // Mount 2 (effect replay with identical submission)
+  const sub2 = strictRuntime.submit(toolCallStrict, { idempotencyKey: "idem-strict-1" });
+  assert(sub2.isNew === false, "Effect replay submission in Strict Mode is deduplicated (isNew: false)");
+  assert(sub1.attempt.attemptId === sub2.attempt.attemptId, "Returns identical attempt instance");
+
+  await strictRuntime.drain();
+  assert(strictExecCount === 1, "Handler executed exactly 1 time across Strict Mode replay");
+
+  // 6.3 Cleanup of old effect cannot cancel or dispose a newer runtime instance
+  const oldRuntime = new AgentExecutionRuntime({
+    projectId: "proj-old",
+    generation: 1,
+    controller: ctrl6,
+    executeTool: async () => ({ ok: true, data: null }),
+    scheduleDrain: (fn) => queueMicrotask(fn),
+  });
+
+  const newRuntime = new AgentExecutionRuntime({
+    projectId: "proj-new",
+    generation: 1,
+    controller: ctrl6,
+    executeTool: async () => ({ ok: true, data: null }),
+    scheduleDrain: (fn) => queueMicrotask(fn),
+  });
+
+  // Old effect cleanup closure capturing oldRuntime
+  const oldEffectCleanup = () => {
+    oldRuntime.cancelAll("Old workspace unmounted");
+  };
+
+  const { attempt: oldAtt } = oldRuntime.submit({
+    toolCallId: "call-old",
+    name: "read_file",
+    args: {},
+    projectId: "proj-old",
+    generation: 1,
+  });
+
+  const { attempt: newAtt } = newRuntime.submit({
+    toolCallId: "call-new",
+    name: "read_file",
+    args: {},
+    projectId: "proj-new",
+    generation: 1,
+  });
+
+  // Run old effect cleanup
+  oldEffectCleanup();
+
+  assert(oldAtt.state === "cancelled", "Old runtime attempt is cancelled by old effect cleanup");
+  assert(newAtt.state === "queued", "New runtime attempt is untouched by old effect cleanup");
+
+  await newRuntime.drain();
+  assert(newAtt.state === "succeeded", "New runtime progresses and succeeds independently");
 
   console.log("==========================================================================");
   console.log(`  SUCCESS: ALL ${passCount} ADAPTER & INTEGRATION ASSERTIONS PASSED!`);

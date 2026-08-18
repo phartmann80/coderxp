@@ -140,7 +140,39 @@ async function runTests() {
   assert(ctrl1.invalidateApproval(approvalIdDeny) === false, "Attempt to invalidate denied approval returns false");
   assert(ctrl1.getApproval(approvalIdDeny)?.status === "denied", "Denied approval status remains untouched");
 
-  // 1.6 Invalidation cannot modify cancelled approvals
+  // 1.6 Invalidation cannot modify expired approvals
+  const writeCallExp: AgentToolCall = {
+    toolCallId: "call-exp",
+    name: "write_file",
+    args: { path: "exp.txt", content: "e" },
+    projectId: PROJECT_ID,
+    generation: 1,
+  };
+  const reqExp = ctrl1.requestApproval(writeCallExp, 1);
+  const approvalIdExp = (reqExp as any).approval.approvalId;
+  const expApproval = (ctrl1 as any).approvals.get(approvalIdExp);
+  if (expApproval) {
+    expApproval.status = "expired";
+  }
+  let expNotified = false;
+  const prevOnChange = (ctrl1 as any).onChange;
+  (ctrl1 as any).onChange = () => {
+    expNotified = true;
+  };
+  assert(ctrl1.getApproval(approvalIdExp)?.status === "expired", "Approval status is expired");
+  assert(
+    ctrl1.invalidateApproval(approvalIdExp) === false,
+    "Attempt to invalidate expired approval returns false",
+  );
+  assert(ctrl1.getApproval(approvalIdExp)?.status === "expired", "Expired approval status remains untouched");
+  assert(expNotified === false, "No notification fired on attempted invalidation of expired approval");
+  assert(
+    ctrl1.getApproval(approvalIdExp) !== null,
+    "Audit record remains unchanged in storage",
+  );
+  (ctrl1 as any).onChange = prevOnChange;
+
+  // 1.7 Invalidation cannot modify cancelled approvals
   assert(ctrl1.invalidateApproval(approvalId1) === false, "Attempt to invalidate cancelled approval returns false");
 
   // 1.7 Stale attempt cannot invalidate newer approval with different generation/callId

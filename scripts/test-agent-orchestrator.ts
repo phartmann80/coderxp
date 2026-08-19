@@ -481,6 +481,120 @@ async function runTests() {
     assert(!unknown.ok && unknown.error.code === "UNKNOWN_TOOL", "Unknown tool name returns UNKNOWN_TOOL error code");
   }
 
+  // 15a. Event after terminal event rejected with PROTOCOL_ERROR (0 tools submitted)
+  {
+    const { runtime, generation } = createTestHarness();
+    const transport = new MockAgentTransport([
+      {
+        events: [
+          { type: "turn-completed", stopReason: "stop" },
+          { type: "text-delta", text: "extra text after terminal" },
+        ],
+      },
+    ]);
+    const orchestrator = new AgentOrchestrator({ projectId: "proj-test", generation, runtime, transport });
+    orchestrator.submitRun("Test event after terminal");
+    await new Promise((r) => setTimeout(r, 20));
+    assert(orchestrator.getState() === "failed", "Event after terminal rejected with run failure");
+    assert(runtime.getAllAttempts().length === 0, "Zero tools submitted on event after terminal");
+  }
+
+  // 15b. Iterator error fails run and submits zero tools
+  {
+    const { runtime, generation } = createTestHarness();
+    const failingTransport: AgentTransport = {
+      send(req) {
+        return {
+          [Symbol.asyncIterator]() {
+            let count = 0;
+            return {
+              async next() {
+                if (count === 0) {
+                  count++;
+                  return {
+                    done: false,
+                    value: {
+                      type: "turn-started",
+                      eventId: "e1",
+                      turnId: req.turnId,
+                      requestId: req.requestId,
+                      sequence: 1,
+                      timestamp: Date.now(),
+                    } as any,
+                  };
+                }
+                throw new Error("Simulated transport stream connection failure");
+              },
+            };
+          },
+        };
+      },
+    };
+    const orchestrator = new AgentOrchestrator({ projectId: "proj-test", generation, runtime, transport: failingTransport });
+    orchestrator.submitRun("Test iterator throw");
+    await new Promise((r) => setTimeout(r, 20));
+    assert(orchestrator.getState() === "failed", "Iterator error fails run");
+    assert(runtime.getAllAttempts().length === 0, "Zero tools submitted on iterator error");
+  }
+
+  // 15c. Stream ends without terminal event rejected with PROTOCOL_ERROR (0 tools submitted)
+  {
+    const { runtime, generation } = createTestHarness();
+    const transport = new MockAgentTransport([
+      {
+        events: [
+          { type: "text-delta", text: "Streaming without terminal event..." },
+          // Omit turn-completed
+        ],
+      },
+    ]);
+    const orchestrator = new AgentOrchestrator({ projectId: "proj-test", generation, runtime, transport });
+    orchestrator.submitRun("Test missing terminal");
+    await new Promise((r) => setTimeout(r, 20));
+    assert(orchestrator.getState() === "failed", "Missing terminal event fails run with PROTOCOL_ERROR");
+    assert(runtime.getAllAttempts().length === 0, "Zero tools submitted on missing terminal event");
+  }
+
+  // 15d. Incomplete tool call in stream fails run and submits zero tools
+  {
+    const { runtime, generation } = createTestHarness();
+    const transport = new MockAgentTransport([
+      {
+        events: [
+          { type: "tool-call-started", toolCallId: "call-incomplete-stream", toolName: "read_file" },
+          { type: "tool-call-arguments-delta", toolCallId: "call-incomplete-stream", chunk: '{"path": "a.ts"}' },
+          // Missing tool-call-completed
+          { type: "turn-completed", stopReason: "tool_calls" },
+        ],
+      },
+    ]);
+    const orchestrator = new AgentOrchestrator({ projectId: "proj-test", generation, runtime, transport });
+    orchestrator.submitRun("Test incomplete tool call");
+    await new Promise((r) => setTimeout(r, 20));
+    assert(orchestrator.getState() === "failed", "Incomplete tool call fails run");
+    assert(runtime.getAllAttempts().length === 0, "Zero tools submitted when tool call remains incomplete");
+  }
+
+  // 15e. Schema validation failure fails run and submits zero tools
+  {
+    const { runtime, generation } = createTestHarness();
+    const transport = new MockAgentTransport([
+      {
+        events: [
+          { type: "tool-call-started", toolCallId: "call-schema-fail", toolName: "read_file" },
+          { type: "tool-call-arguments-delta", toolCallId: "call-schema-fail", chunk: '{"path": "../forbidden/file.txt"}' },
+          { type: "tool-call-completed", toolCallId: "call-schema-fail" },
+          { type: "turn-completed", stopReason: "tool_calls" },
+        ],
+      },
+    ]);
+    const orchestrator = new AgentOrchestrator({ projectId: "proj-test", generation, runtime, transport });
+    orchestrator.submitRun("Test schema validation failure");
+    await new Promise((r) => setTimeout(r, 20));
+    assert(orchestrator.getState() === "failed", "Schema validation failure fails run");
+    assert(runtime.getAllAttempts().length === 0, "Zero tools submitted when schema validation fails");
+  }
+
   // -------------------------------------------------------------------------
   // Section 3: Process Streaming & Stateful Cross-Chunk Redaction
   // -------------------------------------------------------------------------

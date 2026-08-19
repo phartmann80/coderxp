@@ -12,6 +12,7 @@ import { TranscriptIngestionDispatcher } from "../lib/workspace/agent-transcript
 import { AgentExecutionRuntime } from "../lib/workspace/agent-execution-runtime";
 import { AgentPermissionController } from "../lib/workspace/agent-permissions";
 import { AGENT_TOOLS } from "../lib/workspace/agent-tools";
+import type { AgentTransport, AgentTransportRequest } from "../lib/workspace/agent-transport-types";
 
 let passedCount = 0;
 
@@ -503,7 +504,7 @@ async function runTests() {
   {
     const { runtime, generation } = createTestHarness();
     const failingTransport: AgentTransport = {
-      send(req) {
+      send(req: AgentTransportRequest) {
         return {
           [Symbol.asyncIterator]() {
             let count = 0;

@@ -316,6 +316,10 @@ export class AgentOrchestrator {
     this.transport = transport;
   }
 
+  getTransport(): AgentTransport | null {
+    return this.transport;
+  }
+
   // -------------------------------------------------------------------------
   // Run Submission & Lifecycle Control
   // -------------------------------------------------------------------------

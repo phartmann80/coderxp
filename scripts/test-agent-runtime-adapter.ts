@@ -20,9 +20,18 @@ import {
   AgentExecutionRuntime,
   type AgentExecutionEvent,
 } from "../lib/workspace/agent-execution-runtime";
-import { projectEventToTranscriptBlocks } from "../lib/workspace/agent-transcript-projector";
-import type { AgentBlock } from "../lib/workspace/agent-protocol";
+import {
+  projectEventToTranscriptBlocks,
+  TranscriptIngestionDispatcher,
+} from "../lib/workspace/agent-transcript-projector";
+import type { AgentBlock, AgentMessage } from "../lib/workspace/agent-protocol";
 import type { AgentToolResult } from "../lib/workspace/agent-tools";
+import { AgentOrchestrator } from "../lib/workspace/agent-orchestrator";
+import { MockAgentTransport } from "../lib/workspace/agent-mock-transport";
+import {
+  AgentProcessStreamBridge,
+  type MinimalCommandController,
+} from "../lib/workspace/agent-process-stream";
 
 let passCount = 0;
 
@@ -346,6 +355,139 @@ async function runAdapterTests() {
 
   await newRuntime.drain();
   assert(newAtt.state === "succeeded", "New runtime progresses and succeeds independently");
+
+  // -------------------------------------------------------------------------
+  // 7. M3.8 FULL WORKSPACE INTEGRATION & ORCHESTRATOR WIRING
+  // -------------------------------------------------------------------------
+  console.log("\n--- 7. M3.8 FULL WORKSPACE INTEGRATION & ORCHESTRATOR WIRING ---");
+
+  // 7.1 ProjectShell owns stable AgentOrchestrator instance
+  const ctrl7 = new AgentPermissionController();
+  ctrl7.setMode("ask");
+  let tool7Executed = 0;
+  const runtime7 = new AgentExecutionRuntime({
+    projectId: "proj-workspace",
+    generation: 1,
+    controller: ctrl7,
+    executeTool: async () => {
+      tool7Executed++;
+      return { ok: true, data: { status: "file written" } };
+    },
+    scheduleDrain: (fn) => queueMicrotask(fn),
+  });
+
+  const transport7 = new MockAgentTransport([
+    {
+      events: [
+        { type: "text-delta", text: "Starting file write..." },
+        { type: "tool-call-started", toolCallId: "call-ws-1", toolName: "write_file" },
+        { type: "tool-call-arguments-delta", toolCallId: "call-ws-1", chunk: '{"path":"ws.txt","contents":"hello"}' },
+        { type: "tool-call-completed", toolCallId: "call-ws-1" },
+        { type: "turn-completed", stopReason: "tool_calls" },
+      ],
+    },
+    {
+      events: [
+        { type: "text-delta", text: "File written successfully." },
+        { type: "turn-completed", stopReason: "stop" },
+      ],
+    },
+  ]);
+
+  const orchestrator7 = new AgentOrchestrator({
+    projectId: "proj-workspace",
+    generation: 1,
+    runtime: runtime7,
+    transport: transport7,
+  });
+
+  assert(orchestrator7.getState() === "idle", "Orchestrator initialized in idle state");
+
+  // 7.2 Prompt submission starts orchestrator and updates visible transcript
+  const dispatcher7 = new TranscriptIngestionDispatcher();
+  const transcript7: AgentMessage[] = [];
+
+  // Submit prompt
+  orchestrator7.submitRun("Create ws.txt");
+  assert(orchestrator7.getState() === "starting" || orchestrator7.getState() === "streaming" || orchestrator7.getState() === "waiting-for-approval", "Prompt starts orchestrator run");
+
+  await new Promise((r) => setTimeout(r, 20));
+  assert(orchestrator7.getState() === "waiting-for-approval", "Paused at waiting-for-approval for write_file");
+
+  // 7.3 Approval targets correlated M3.7 attempt
+  const pending7 = ctrl7.getPending();
+  assert(pending7.length === 1, "Approval request pending in controller");
+  const apprId7 = pending7[0].approvalId;
+  ctrl7.approve(apprId7, 1);
+
+  const activeAtt7 = runtime7.getActiveHead();
+  assert(activeAtt7 !== null && activeAtt7.approvalId === apprId7, "Found correlated M3.7 attempt");
+  await runtime7.resume(activeAtt7!.attemptId);
+
+  await new Promise((r) => setTimeout(r, 40));
+  assert(orchestrator7.getState() === "completed", "Orchestrator run completed after tool resolution");
+  assert(tool7Executed === 1, "Tool executed exactly 1 time through gate");
+
+  // 7.4 Process-stream bridge connects to command controller and emits process output
+  class MockCmdController implements MinimalCommandController {
+    private outCb: ((pId: string, chunk: string) => void) | null = null;
+    private stCb: ((h: { processId: string; state: string; exitCode: number | null }) => void) | null = null;
+
+    onOutput(cb: (pId: string, chunk: string) => void) {
+      this.outCb = cb;
+    }
+    onStateChange(cb: (h: { processId: string; state: string; exitCode: number | null }) => void) {
+      this.stCb = cb;
+    }
+    emitOut(pId: string, chunk: string) {
+      this.outCb?.(pId, chunk);
+    }
+    emitDone(pId: string, exitCode: number) {
+      this.stCb?.({ processId: pId, state: "completed", exitCode });
+    }
+  }
+
+  const mockCmdCtrl = new MockCmdController();
+  const bridge7 = new AgentProcessStreamBridge(mockCmdCtrl);
+  let processEvtCount = 0;
+  const unsubBridge = bridge7.onEvent((evt) => {
+    processEvtCount++;
+    dispatcher7.ingestProcessEvent(evt);
+  });
+
+  bridge7.correlateProcess("cmd-100", {
+    toolCallId: "call-ws-1",
+    attemptId: activeAtt7!.attemptId,
+    projectId: "proj-workspace",
+    generation: 1,
+    command: "npm test",
+  });
+  mockCmdCtrl.emitOut("cmd-100", "Build passing\n");
+  mockCmdCtrl.emitDone("cmd-100", 0);
+
+  assert(processEvtCount >= 2, "Process-stream bridge emitted events to dispatcher");
+  const blocks7 = dispatcher7.getBlocks();
+  assert(blocks7.some((b) => b.kind === "command-started"), "Transcript contains command-started block");
+  assert(blocks7.some((b) => b.kind === "command-output"), "Transcript contains command-output block");
+  assert(blocks7.some((b) => b.kind === "command-completed"), "Transcript contains command-completed block");
+
+  // 7.5 Unsubscribing bridge cleans up without affecting orchestrator
+  unsubBridge();
+  bridge7.dispose();
+  const prevCount = processEvtCount;
+  mockCmdCtrl.emitOut("cmd-100", "ignored\n");
+  assert(processEvtCount === prevCount, "Unsubscribed bridge receives zero further events");
+
+  // 7.6 Project switch stales active orchestrator
+  const switchOrchestrator = new AgentOrchestrator({
+    projectId: "proj-switch-old",
+    generation: 1,
+    runtime: runtime7,
+    transport: new MockAgentTransport([{ events: [{ type: "text-delta", text: "hi" }] }]),
+  });
+  switchOrchestrator.submitRun("Run before switch");
+  switchOrchestrator.invalidateGeneration(2);
+  assert(switchOrchestrator.getState() === "stale", "Project switch / generation invalidation stales active orchestrator");
 
   console.log("==========================================================================");
   console.log(`  SUCCESS: ALL ${passCount} ADAPTER & INTEGRATION ASSERTIONS PASSED!`);

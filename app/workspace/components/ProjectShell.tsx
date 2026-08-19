@@ -35,7 +35,7 @@
  * here executes a tool; approving only resolves an approval object.
  */
 
-import { useMemo, useState, useCallback, useRef } from "react";
+import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import {
   HardDrive,
   Pencil,
@@ -59,6 +59,8 @@ import { useAgentTools } from "../hooks/useAgentTools";
 import { useAgentPermissions } from "../hooks/useAgentPermissions";
 import { useProjectGeneration } from "../hooks/useProjectGeneration";
 import { useAgentExecutionRuntime } from "../hooks/useAgentExecutionRuntime";
+import { useAgentOrchestrator } from "../hooks/useAgentOrchestrator";
+import { AgentProcessStreamBridge } from "@/lib/workspace/agent-process-stream";
 import { getTerminal } from "@/lib/workspace/terminal";
 import { getCommandController } from "@/lib/workspace/command-controller";
 import {
@@ -161,7 +163,7 @@ export function ProjectShell({
   }, project.templateId);
 
   const commands = useCommands();
-  const chat = useAgentChat(project.id);
+
   // Auto-sync is effect-driven inside the hook (command complete / Run complete).
   useFileSync(
     project.id,
@@ -183,9 +185,6 @@ export function ProjectShell({
   // M3.5 tool bridge. Bound here because this is where the authoritative file
   // list, the runtime, and the command controller already meet. Held for the
   // M3.7 execution loop.
-  //
-  // M3.6 routes every agent-requested call through `permissions.controller`
-  // first, so the execution loop cannot reach a handler without a decision.
   const tools = useAgentTools({
     projectId: project.id,
     templateId: project.templateId,
@@ -198,8 +197,6 @@ export function ProjectShell({
     onRefreshFiles,
     onRunProject: runtime.run,
     onStopProject: runtime.stop,
-    // Same flush the runtime and the command panel already use. When no editor
-    // is mounted there is nothing to flush, which is a success, not a failure.
     onFlushEditor: async () =>
       flushAllRef.current ? flushAllRef.current() : true,
     onInvalidateEditorPaths: (paths) => {
@@ -217,6 +214,35 @@ export function ProjectShell({
       chat.handleExecutionEvent(event);
     },
   });
+
+  // M3.8 Agent Orchestrator. Owns multi-turn turn loops and transport streaming.
+  const orchestrator = useAgentOrchestrator({
+    projectId: project.id,
+    generation: projectGeneration.generation,
+    runtime: execution.runtime,
+    onEvent: (event) => {
+      chat.handleOrchestratorEvent(event);
+    },
+  });
+
+  const chat = useAgentChat(project.id, {
+    generation: projectGeneration.generation,
+    orchestrator,
+  });
+
+  // M3.8: Process streaming bridge connected to the active WorkspaceCommandController singleton
+  useEffect(() => {
+    const cmdController = getCommandController();
+    const bridge = new AgentProcessStreamBridge(cmdController);
+    const unsub = bridge.onEvent((event) => {
+      chat.handleProcessEvent(event);
+    });
+
+    return () => {
+      unsub();
+      bridge.dispose();
+    };
+  }, [chat]);
 
   const handleApprove = useCallback(
     (approvalId: string) => {

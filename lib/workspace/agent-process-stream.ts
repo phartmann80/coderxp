@@ -261,7 +261,12 @@ export class AgentProcessStreamBridge {
     const state = this.activeProcesses.get(handle.processId);
     if (!state) return;
 
-    if (handle.state === "exited" || handle.state === "failed" || handle.state === "cancelled") {
+    if (
+      handle.state === "exited" ||
+      handle.state === "completed" ||
+      handle.state === "failed" ||
+      handle.state === "cancelled"
+    ) {
       // Flush redactor tail
       const flushedTail = state.redactor.flush();
       if (flushedTail && !state.isTruncated) {

@@ -83,6 +83,11 @@ interface RuntimePanelProps {
   pendingApprovals: AgentApprovalRequest[];
   onApproveRequest: (approvalId: string) => void;
   onDenyRequest: (approvalId: string) => void;
+  /** M3.9 BYOK actions & state */
+  hasByokKey?: boolean;
+  byokStatus?: "unverified" | "active" | "error";
+  onSetByokKey?: (key: string) => boolean;
+  onClearByokKey?: () => void;
 }
 
 export function RuntimePanel({
@@ -111,6 +116,10 @@ export function RuntimePanel({
   pendingApprovals,
   onApproveRequest,
   onDenyRequest,
+  hasByokKey,
+  byokStatus,
+  onSetByokKey,
+  onClearByokKey,
 }: RuntimePanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>("preview");
 
@@ -204,6 +213,10 @@ export function RuntimePanel({
             pendingApprovals={pendingApprovals}
             onApproveRequest={onApproveRequest}
             onDenyRequest={onDenyRequest}
+            hasByokKey={hasByokKey}
+            byokStatus={byokStatus}
+            onSetByokKey={onSetByokKey}
+            onClearByokKey={onClearByokKey}
           />
         )}
         {activeTab === "preview" && (

@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Send, Square, Plus } from "lucide-react";
+import { Send, Square, Plus, Key, X, Check } from "lucide-react";
 import {
   AGENT_NOT_CONNECTED_MESSAGE,
   type AgentBlock,
@@ -62,6 +62,12 @@ interface AgentChatPanelProps {
   /** Resolve one exact pending approval by id. */
   onApproveRequest: (approvalId: string) => void;
   onDenyRequest: (approvalId: string) => void;
+  /** M3.9 BYOK state & actions */
+  hasByokKey?: boolean;
+  byokStatus?: "unverified" | "active" | "error";
+  onSetByokKey?: (key: string) => boolean;
+  onClearByokKey?: () => void;
+  byokProvider?: "anthropic";
 }
 
 // ---------------------------------------------------------------------------
@@ -327,8 +333,15 @@ export function AgentChatPanel({
   pendingApprovals,
   onApproveRequest,
   onDenyRequest,
+  hasByokKey = false,
+  byokStatus = "unverified",
+  onSetByokKey,
+  onClearByokKey,
 }: AgentChatPanelProps) {
   const [input, setInput] = useState("");
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
+  const [keyError, setKeyError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -362,15 +375,60 @@ export function AgentChatPanel({
     [handleSend],
   );
 
+  const handleSaveKey = useCallback(() => {
+    setKeyError(null);
+    if (!keyInput.trim()) {
+      setKeyError("Please enter an API key.");
+      return;
+    }
+    const ok = onSetByokKey?.(keyInput.trim());
+    if (ok) {
+      setKeyInput("");
+      setShowKeyModal(false);
+    } else {
+      setKeyError("Invalid API key format. Ensure it is a valid, printable string.");
+    }
+  }, [keyInput, onSetByokKey]);
+
+  const handleClearKey = useCallback(() => {
+    onClearByokKey?.();
+    setKeyInput("");
+    setKeyError(null);
+    setShowKeyModal(false);
+  }, [onClearByokKey]);
+
   return (
-    <div className="flex flex-col h-full bg-[#0a0b0d]">
+    <div className="relative flex flex-col h-full bg-[#0a0b0d]">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-800 bg-gray-900/50">
         <span className="text-xs text-gray-500 uppercase tracking-wide">Agent</span>
-        <span className="text-xs text-gray-600">
-          {isStreaming ? "streaming" : isConnected ? "ready" : "not connected"}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              hasByokKey
+                ? isStreaming
+                  ? "bg-cyan-400 animate-pulse"
+                  : "bg-emerald-400"
+                : "bg-amber-400"
+            }`}
+          />
+          <span className="text-xs text-gray-400 font-mono">
+            {hasByokKey ? "Claude 3.5 Sonnet" : "BYOK Required"}
+          </span>
+        </div>
         <div className="ml-auto flex items-center gap-1.5">
+          <button
+            onClick={() => setShowKeyModal(!showKeyModal)}
+            className={`flex items-center gap-1 px-1.5 py-0.5 text-xs rounded border transition-colors ${
+              hasByokKey
+                ? "text-emerald-400 border-emerald-800/60 bg-emerald-950/30 hover:bg-emerald-950/60"
+                : "text-amber-400 border-amber-800/60 bg-amber-950/30 hover:bg-amber-950/60"
+            }`}
+            title="Configure Anthropic API Key (BYOK)"
+          >
+            <Key className="w-3 h-3" />
+            <span>{hasByokKey ? "BYOK Active" : "Set API Key"}</span>
+          </button>
           <AgentModeSelector
             mode={permissionMode}
             setMode={onPermissionModeChange}
@@ -398,13 +456,82 @@ export function AgentChatPanel({
         </div>
       </div>
 
-      {/* Truthful connection state */}
-      {!isConnected && (
-        <div className="px-3 py-1.5 border-b border-gray-800/60 bg-gray-900/30">
-          <p className="text-xs text-gray-500">
-            {AGENT_NOT_CONNECTED_MESSAGE}. Messages stay local and no
-            completions are generated.
+      {/* BYOK Key Modal / Popover */}
+      {showKeyModal && (
+        <div className="absolute top-10 left-3 right-3 z-30 p-3 bg-gray-900 border border-gray-700 rounded-lg shadow-xl space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-200">
+              <Key className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Anthropic API Key (BYOK)</span>
+            </div>
+            <button
+              onClick={() => setShowKeyModal(false)}
+              className="text-gray-400 hover:text-gray-200"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-400 leading-relaxed">
+            Your key is held strictly in session memory and sent over HTTPS only to our self-hosted proxy. It is never saved to disk, IndexedDB, or WebContainer files.
           </p>
+          <div className="space-y-1.5">
+            <input
+              type="password"
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleSaveKey();
+                }
+              }}
+              placeholder="sk-ant-..."
+              className="w-full px-2 py-1 text-xs text-gray-100 bg-gray-950 border border-gray-700 rounded font-mono focus:outline-none focus:border-cyan-500"
+            />
+            {keyError && <p className="text-[11px] text-red-400">{keyError}</p>}
+          </div>
+          <div className="flex items-center justify-between pt-1">
+            {hasByokKey ? (
+              <button
+                onClick={handleClearKey}
+                className="px-2 py-1 text-[11px] text-red-400 hover:text-red-300 border border-red-800/60 rounded"
+              >
+                Clear Key
+              </button>
+            ) : (
+              <span className="text-[11px] text-gray-500 italic">No key connected</span>
+            )}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setShowKeyModal(false)}
+                className="px-2 py-1 text-[11px] text-gray-400 hover:text-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveKey}
+                className="flex items-center gap-1 px-2.5 py-1 text-[11px] text-cyan-300 bg-cyan-950/80 border border-cyan-700 rounded hover:bg-cyan-900 transition-colors"
+              >
+                <Check className="w-3 h-3" />
+                <span>Save Key</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Truthful connection state */}
+      {!hasByokKey && (
+        <div className="px-3 py-1.5 border-b border-amber-900/40 bg-amber-950/20 flex items-center justify-between">
+          <p className="text-xs text-amber-300/90">
+            Anthropic API key required to stream agent turns.
+          </p>
+          <button
+            onClick={() => setShowKeyModal(true)}
+            className="text-xs text-cyan-400 underline hover:text-cyan-300 ml-2"
+          >
+            Connect Key
+          </button>
         </div>
       )}
 

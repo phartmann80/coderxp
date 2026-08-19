@@ -60,6 +60,8 @@ import { useAgentPermissions } from "../hooks/useAgentPermissions";
 import { useProjectGeneration } from "../hooks/useProjectGeneration";
 import { useAgentExecutionRuntime } from "../hooks/useAgentExecutionRuntime";
 import { useAgentOrchestrator } from "../hooks/useAgentOrchestrator";
+import { useByokCredentials } from "../hooks/useByokCredentials";
+import { HttpAgentTransport } from "@/lib/workspace/agent-http-transport";
 import { AgentProcessStreamBridge } from "@/lib/workspace/agent-process-stream";
 import { getTerminal } from "@/lib/workspace/terminal";
 import { getCommandController } from "@/lib/workspace/command-controller";
@@ -215,11 +217,21 @@ export function ProjectShell({
     },
   });
 
-  // M3.8 Agent Orchestrator. Owns multi-turn turn loops and transport streaming.
+  // M3.9 BYOK session-scoped credential manager
+  const byok = useByokCredentials();
+
+  const transport = useMemo(() => {
+    return new HttpAgentTransport({
+      getApiKey: byok.getApiKey,
+    });
+  }, [byok.getApiKey]);
+
+  // M3.8 + M3.9 Agent Orchestrator. Owns multi-turn turn loops and transport streaming.
   const orchestrator = useAgentOrchestrator({
     projectId: project.id,
     generation: projectGeneration.generation,
     runtime: execution.runtime,
+    transport,
     onEvent: (event) => {
       chat.handleOrchestratorEvent(event);
     },
@@ -771,6 +783,10 @@ export function ProjectShell({
               pendingApprovals={permissions.pending}
               onApproveRequest={handleApprove}
               onDenyRequest={handleDeny}
+              hasByokKey={byok.hasKey}
+              byokStatus={byok.status}
+              onSetByokKey={byok.setKey}
+              onClearByokKey={byok.clearKey}
             />
           </div>
         </div>

@@ -361,6 +361,19 @@ export function validateAndTranslateRequest(
       }
 
       const manifestTool = getManifestTool(clientTool.name)!;
+      if (
+        clientTool.category !== manifestTool.category ||
+        clientTool.risk !== manifestTool.risk ||
+        clientTool.requiresApproval !== manifestTool.requiresApproval
+      ) {
+        return {
+          ok: false,
+          errorCode: "TOOL_NOT_ALLOWED",
+          message: `Tool '${clientTool.name}' definition does not match the server manifest.`,
+          status: 400,
+        };
+      }
+
       anthropicTools.push({
         name: manifestTool.name,
         description: manifestTool.summary,

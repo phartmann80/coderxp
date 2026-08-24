@@ -1,15 +1,11 @@
 /**
  * Deterministic Production End-to-End Test Suite for CoderXP M3.9.
  *
- * Spawns a local deterministic fake Anthropic HTTP server and verifies:
- * - Real HTTP streaming transport (HttpAgentTransport)
- * - Complete 2-turn execution loop: User -> Stream -> Tool Request -> M3.6 Gate -> M3.7 Execution -> M3.8 Injection -> Completion
- * - Missing/Invalid BYOK Key rejection (BYOK-only mode enforcement)
- * - Upstream 429 Rate-limit, 500 Provider-error, and premature EOF handling
- * - Client cancellation propagation to upstream HTTP request
- * - Strict security: Raw API key is absent from transcripts, errors, and disk
+ * Uses the real agent stream handler behind a thin HTTP adapter (no duplicated
+ * validation/security logic). A local fake Anthropic server is reached only
+ * through the handler's injected fetchUpstream boundary.
  *
- * Zero external cloud calls, 100% deterministic local assertions.
+ * Zero external cloud calls.
  */
 
 import http from "node:http";
@@ -19,10 +15,14 @@ import { HttpAgentTransport } from "../lib/workspace/agent-http-transport";
 import { AgentExecutionRuntime } from "../lib/workspace/agent-execution-runtime";
 import { AgentPermissionController } from "../lib/workspace/agent-permissions";
 import {
-  validateAndTranslateRequest,
-  AnthropicStreamTranslator,
-} from "../lib/server/agent-anthropic-adapter";
-import type { AgentTransportRequest, AgentTransportEvent } from "../lib/workspace/agent-transport-types";
+  createAgentStreamHandler,
+  createConcurrencyGate,
+  defaultStreamLimits,
+  PRODUCTION_ANTHROPIC_MESSAGES_URL,
+} from "../lib/server/agent-stream-handler";
+
+/** Intentionally invalid. Not an Anthropic key format. Never a live credential. */
+const SYNTHETIC_BYOK_FIXTURE = "cxp-test-invalid-not-a-credential";
 
 let passCount = 0;
 
@@ -33,6 +33,11 @@ function assert(condition: boolean, message: string): void {
   }
   passCount++;
   console.log(`[PASS #${passCount}] ${message}`);
+}
+
+function assertFixtureAbsent(label: string, value: unknown): void {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value);
+  assert(!serialized.includes(SYNTHETIC_BYOK_FIXTURE), `${label} does not contain the synthetic BYOK fixture`);
 }
 
 interface FakeServerBehavior {
@@ -82,7 +87,6 @@ function createFakeAnthropicServer(): {
       });
 
       if (behavior.prematureClose) {
-        // Send partial data then destroy
         res.write('data: {"type":"message_start"}\n\n');
         res.destroy();
         return;
@@ -120,154 +124,70 @@ function createFakeAnthropicServer(): {
 }
 
 /**
- * Creates a local test proxy server simulating Next.js /api/agent/stream handler
+ * Thin HTTP adapter around the real stream handler. No request validation,
+ * translation, or permission logic lives here.
  */
-function createTestProxyServer(upstreamUrl: string): {
+function createHandlerHttpAdapter(handler: (req: Request) => Promise<Response>): {
   server: http.Server;
-  getProxyUrl: () => string;
+  getUrl: () => string;
   close: () => Promise<void>;
 } {
-  const server = http.createServer(async (req, res) => {
-    const byokKey = req.headers["x-coderxp-byok-key"] as string | undefined;
-
-    if (!byokKey || typeof byokKey !== "string" || byokKey.trim().length === 0) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          errorCode: "INVALID_CREDENTIALS",
-          message: "A valid Anthropic API key is required.",
-        }),
-      );
-      return;
-    }
-
-    let rawBody = "";
-    req.on("data", (chunk) => {
-      rawBody += chunk.toString("utf8");
+  const server = http.createServer(async (incoming, outgoing) => {
+    const abort = new AbortController();
+    incoming.on("aborted", () => {
+      abort.abort();
+    });
+    outgoing.on("close", () => {
+      if (!outgoing.writableEnded) abort.abort();
     });
 
-    req.on("end", async () => {
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(rawBody);
-      } catch {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ errorCode: "INVALID_REQUEST", message: "Malformed JSON" }));
-        return;
-      }
+    const chunks: Buffer[] = [];
+    for await (const chunk of incoming) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
 
-      const transportReq = parsed as unknown as AgentTransportRequest;
-      const translation = validateAndTranslateRequest(transportReq);
-      if (!translation.ok) {
-        res.writeHead(translation.status, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ errorCode: translation.errorCode, message: translation.message }));
-        return;
-      }
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(incoming.headers)) {
+      if (typeof value === "string") headers.set(key, value);
+      else if (Array.isArray(value)) headers.set(key, value.join(", "));
+    }
 
-      const requestId = transportReq.requestId || "req-test";
-      const turnId = transportReq.turnId || "turn-test";
-      const abortCtrl = new AbortController();
+    const method = incoming.method ?? "POST";
+    const request = new Request(`http://127.0.0.1${incoming.url ?? "/"}`, {
+      method,
+      headers,
+      body: method === "GET" || method === "HEAD" ? undefined : Buffer.concat(chunks),
+      signal: abort.signal,
+    });
 
-      res.on("close", () => {
-        if (!res.writableEnded) {
-          abortCtrl.abort();
-        }
+    try {
+      const response = await handler(request);
+      const responseHeaders: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        responseHeaders[key] = value;
       });
-
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      });
-
-      const translator = new AnthropicStreamTranslator(requestId, turnId, (event) => {
-        if (!res.writableEnded) {
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
-        }
-      });
-
-      try {
-        const upstreamResp = await fetch(upstreamUrl, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "x-api-key": byokKey,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify(translation.body),
-          signal: abortCtrl.signal,
-        });
-
-        if (!upstreamResp.ok) {
-          let code = "UPSTREAM_ERROR";
-          if (upstreamResp.status === 401) code = "INVALID_CREDENTIALS";
-          if (upstreamResp.status === 429) code = "RATE_LIMITED";
-          if (upstreamResp.status >= 500) code = "PROVIDER_UNAVAILABLE";
-          translator.emitTerminalError(code, `Provider returned ${upstreamResp.status}`);
-          res.end();
-          return;
-        }
-
-        if (!upstreamResp.body) {
-          translator.emitTerminalError("UPSTREAM_PROTOCOL_ERROR", "Empty upstream body");
-          res.end();
-          return;
-        }
-
-        const reader = upstreamResp.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
+      outgoing.writeHead(response.status, responseHeaders);
+      if (response.body) {
+        const reader = response.body.getReader();
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed.startsWith("data:")) {
-              const dataStr = trimmed.slice(5).trim();
-              if (dataStr === "[DONE]") {
-                if (!translator.isTerminalCommitted()) translator.emitTerminalCompleted("stop");
-                continue;
-              }
-              try {
-                const eventObj = JSON.parse(dataStr);
-                translator.handleAnthropicEvent(eventObj);
-              } catch {
-                translator.emitTerminalError("UPSTREAM_PROTOCOL_ERROR", "Malformed JSON");
-                break;
-              }
-            }
-          }
-
-          if (translator.isTerminalCommitted()) break;
-        }
-
-        if (!translator.isTerminalCommitted()) {
-          translator.emitTerminalError("UPSTREAM_PREMATURE_CLOSE", "Upstream closed prematurely");
-        }
-      } catch (err: unknown) {
-        if (abortCtrl.signal.aborted) {
-          translator.emitTerminalCancelled("Request aborted");
-        } else {
-          translator.emitTerminalError("PROVIDER_UNAVAILABLE", "Connection error");
-        }
-      } finally {
-        if (!res.writableEnded) {
-          res.end();
+          outgoing.write(value);
         }
       }
-    });
+    } catch {
+      if (!outgoing.headersSent) {
+        outgoing.writeHead(500, { "Content-Type": "application/json" });
+        outgoing.write(JSON.stringify({ errorCode: "INTERNAL_ERROR", message: "Handler adapter failed." }));
+      }
+    } finally {
+      if (!outgoing.writableEnded) outgoing.end();
+    }
   });
 
   return {
     server,
-    getProxyUrl: () => {
+    getUrl: () => {
       const addr = server.address() as AddressInfo;
       return `http://127.0.0.1:${addr.port}`;
     },
@@ -300,15 +220,23 @@ async function runProductionE2ETests() {
   const fakeAnthropic = createFakeAnthropicServer();
   await new Promise<void>((resolve) => fakeAnthropic.server.listen(0, "127.0.0.1", () => resolve()));
 
-  const proxy = createTestProxyServer(fakeAnthropic.getUrl());
-  await new Promise<void>((resolve) => proxy.server.listen(0, "127.0.0.1", () => resolve()));
+  const handler = createAgentStreamHandler({
+    fetchUpstream: async (url, init) => {
+      assert(url === PRODUCTION_ANTHROPIC_MESSAGES_URL, "E2E upstream URL is the server-owned Anthropic origin");
+      assert(!url.includes(SYNTHETIC_BYOK_FIXTURE), "E2E upstream URL does not contain the BYOK fixture");
+      return fetch(fakeAnthropic.getUrl(), init);
+    },
+    clock: () => Date.now(),
+    scheduleTimeout: (fn, ms) => setTimeout(fn, ms),
+    cancelTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
+    limits: defaultStreamLimits,
+    concurrency: createConcurrencyGate(50),
+  });
 
-  const TEST_API_KEY = "sk-ant-test-secret-key-123456789";
+  const adapter = createHandlerHttpAdapter(handler);
+  await new Promise<void>((resolve) => adapter.server.listen(0, "127.0.0.1", () => resolve()));
 
   try {
-    // -----------------------------------------------------------------------
-    // 1. COMPLETE TWO-TURN REAL-TOOL EXECUTION LOOP
-    // -----------------------------------------------------------------------
     console.log("\n--- 1. COMPLETE TWO-TURN REAL-TOOL EXECUTION LOOP ---");
 
     let turnCount = 0;
@@ -324,12 +252,11 @@ async function runProductionE2ETests() {
         'data: {"type":"message_stop"}',
       ],
       onReceivedHeaders: (headers) => {
-        assert(headers["x-api-key"] === TEST_API_KEY, "Upstream received exact BYOK key in header");
+        assert(headers["x-api-key"] === SYNTHETIC_BYOK_FIXTURE, "Upstream received exact BYOK key in header");
       },
       onReceivedBody: (body) => {
         turnCount++;
         if (turnCount === 2) {
-          // Turn 2: model receives tool result and finishes
           const msgs = body.messages as Array<Record<string, unknown>>;
           assert(msgs.length === 3, "Upstream turn 2 payload contains 3 messages (user, assistant, tool_result)");
           const toolResultMsg = msgs[2];
@@ -337,6 +264,7 @@ async function runProductionE2ETests() {
           const blocks = toolResultMsg.content as Array<Record<string, unknown>>;
           assert(blocks[0].type === "tool_result", "Block is tool_result");
           assert(blocks[0].tool_use_id === "call-e2e-1", "tool_use_id matches call-e2e-1");
+          assertFixtureAbsent("upstream turn-2 body", body);
 
           fakeAnthropic.setBehavior({
             sseLines: [
@@ -359,16 +287,16 @@ async function runProductionE2ETests() {
       projectId: "proj-e2e",
       generation: 1,
       controller: permissionCtrl,
-      executeTool: async (call) => {
+      executeTool: async () => {
         toolExecuted++;
         return { ok: true, data: { path: "hello.txt", size: 11 } };
       },
       scheduleDrain: (fn) => queueMicrotask(fn),
     });
 
-    let currentApiKey: string | null = TEST_API_KEY;
+    let currentApiKey: string | null = SYNTHETIC_BYOK_FIXTURE;
     const transport = new HttpAgentTransport({
-      endpoint: proxy.getProxyUrl(),
+      endpoint: adapter.getUrl(),
       getApiKey: () => currentApiKey,
     });
 
@@ -379,15 +307,24 @@ async function runProductionE2ETests() {
       transport,
     });
 
-    // Step 1: Submit initial user prompt
     orchestrator.submitRun("Create hello.txt");
-    assert(orchestrator.getState() === "starting" || orchestrator.getState() === "streaming" || orchestrator.getState() === "waiting-for-approval", "Run started");
+    assert(
+      orchestrator.getState() === "starting" ||
+        orchestrator.getState() === "streaming" ||
+        orchestrator.getState() === "waiting-for-approval",
+      "Run started",
+    );
 
-    // Wait for tool execution pause
-    const stateAfterTurn1 = await waitForState(orchestrator, (s) => s === "waiting-for-approval" || s === "failed", 3000);
-    assert(stateAfterTurn1 === "waiting-for-approval", `Orchestrator paused at waiting-for-approval (actual: ${stateAfterTurn1})`);
+    const stateAfterTurn1 = await waitForState(
+      orchestrator,
+      (s) => s === "waiting-for-approval" || s === "failed",
+      3000,
+    );
+    assert(
+      stateAfterTurn1 === "waiting-for-approval",
+      `Orchestrator paused at waiting-for-approval (actual: ${stateAfterTurn1})`,
+    );
 
-    // Step 2: Approve tool call in M3.6 controller & resume M3.7 runtime
     const pending = permissionCtrl.getPending();
     assert(pending.length === 1, "Exactly one approval pending");
     permissionCtrl.approve(pending[0].approvalId, 1);
@@ -396,61 +333,50 @@ async function runProductionE2ETests() {
     assert(activeAtt !== null, "Found active execution attempt in runtime");
     await runtime.resume(activeAtt!.attemptId);
 
-    // Wait for Turn 2 completion
     const stateAfterTurn2 = await waitForState(orchestrator, (s) => s === "completed" || s === "failed", 3000);
     assert(stateAfterTurn2 === "completed", `Orchestrator run completed after Turn 2 (actual: ${stateAfterTurn2})`);
     assert(toolExecuted === 1, "Tool handler executed exactly 1 time through gate");
 
     const messages = orchestrator.getMessages();
-    assert(messages.length === 4, "Conversation contains 4 canonical messages (user, assistant-call, tool-result, assistant-done)");
+    assert(
+      messages.length === 4,
+      "Conversation contains 4 canonical messages (user, assistant-call, tool-result, assistant-done)",
+    );
     assert(messages[0].role === "user", "Message 1 is user");
     assert(messages[1].role === "assistant", "Message 2 is assistant tool request");
     assert(messages[2].role === "tool", "Message 3 is tool result envelope");
     assert(messages[3].role === "assistant", "Message 4 is final assistant message");
+    assertFixtureAbsent("orchestrator transcript", messages);
 
-    // -----------------------------------------------------------------------
-    // 2. SECURITY & CREDENTIAL PRIVACY ASSERTIONS
-    // -----------------------------------------------------------------------
     console.log("\n--- 2. SECURITY & CREDENTIAL PRIVACY ASSERTIONS ---");
+    assertFixtureAbsent("serialized transcript", messages);
 
-    const serializedTranscript = JSON.stringify(messages);
-    assert(!serializedTranscript.includes(TEST_API_KEY), "API key is absent from all conversation transcript messages");
-
-    // -----------------------------------------------------------------------
-    // 3. NEGATIVE CONTROLS: MISSING/INVALID BYOK KEY
-    // -----------------------------------------------------------------------
     console.log("\n--- 3. NEGATIVE CONTROLS: MISSING/INVALID BYOK KEY ---");
-
-    currentApiKey = null; // simulate user clearing key
+    currentApiKey = null;
     const noKeyOrchestrator = new AgentOrchestrator({
       projectId: "proj-no-key",
       generation: 1,
       runtime,
       transport,
     });
-
     noKeyOrchestrator.submitRun("Hello without key");
     const noKeyState = await waitForState(noKeyOrchestrator, (s) => s === "failed", 2000);
     assert(noKeyState === "failed", "Run fails immediately when BYOK key is missing");
+    assertFixtureAbsent("no-key orchestrator messages", noKeyOrchestrator.getMessages());
 
-    // -----------------------------------------------------------------------
-    // 4. NEGATIVE CONTROLS: RATE LIMIT (429) & UPSTREAM 500
-    // -----------------------------------------------------------------------
     console.log("\n--- 4. NEGATIVE CONTROLS: RATE LIMIT (429) & UPSTREAM 500 ---");
-
-    currentApiKey = TEST_API_KEY;
+    currentApiKey = SYNTHETIC_BYOK_FIXTURE;
     fakeAnthropic.setBehavior({ status: 429 });
-
     const rateLimitOrch = new AgentOrchestrator({
       projectId: "proj-429",
       generation: 1,
       runtime,
       transport,
     });
-
     rateLimitOrch.submitRun("Rate limit test");
     const rateLimitState = await waitForState(rateLimitOrch, (s) => s === "failed", 2000);
     assert(rateLimitState === "failed", "Run fails when provider returns 429 Rate Limit");
+    assertFixtureAbsent("429 orchestrator messages", rateLimitOrch.getMessages());
 
     fakeAnthropic.setBehavior({ status: 500 });
     const serverErrOrch = new AgentOrchestrator({
@@ -459,16 +385,12 @@ async function runProductionE2ETests() {
       runtime,
       transport,
     });
-
     serverErrOrch.submitRun("Server error test");
     const serverErrState = await waitForState(serverErrOrch, (s) => s === "failed", 2000);
     assert(serverErrState === "failed", "Run fails when provider returns 500 Server Error");
+    assertFixtureAbsent("500 orchestrator messages", serverErrOrch.getMessages());
 
-    // -----------------------------------------------------------------------
-    // 5. NEGATIVE CONTROLS: PREMATURE UPSTREAM EOF
-    // -----------------------------------------------------------------------
     console.log("\n--- 5. NEGATIVE CONTROLS: PREMATURE UPSTREAM EOF ---");
-
     fakeAnthropic.setBehavior({ status: 200, prematureClose: true });
     const eofOrch = new AgentOrchestrator({
       projectId: "proj-eof",
@@ -476,16 +398,16 @@ async function runProductionE2ETests() {
       runtime,
       transport,
     });
-
     eofOrch.submitRun("Premature EOF test");
     const eofState = await waitForState(eofOrch, (s) => s === "failed", 2000);
     assert(eofState === "failed", "Run fails closed when upstream stream closes prematurely without terminal event");
+    assertFixtureAbsent("eof orchestrator messages", eofOrch.getMessages());
 
     console.log("==========================================================================");
     console.log(`  SUCCESS: ALL ${passCount} PRODUCTION E2E ASSERTIONS PASSED!`);
     console.log("==========================================================================");
   } finally {
-    await proxy.close();
+    await adapter.close();
     await fakeAnthropic.close();
   }
 }

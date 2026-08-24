@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "npx tsx scripts/test-agent-permissions.ts && npx tsx scripts/test-agent-execution-runtime.ts && npx tsx scripts/test-agent-runtime-adapter.ts && npx tsx scripts/test-agent-orchestrator.ts && npx tsx scripts/test-agent-anthropic-adapter.ts && npx tsx scripts/test-agent-production-e2e.ts"
+    "test": "npx tsx scripts/test-agent-permissions.ts && npx tsx scripts/test-agent-execution-runtime.ts && npx tsx scripts/test-agent-runtime-adapter.ts && npx tsx scripts/test-agent-orchestrator.ts && npx tsx scripts/test-agent-anthropic-adapter.ts && npx tsx scripts/test-agent-stream-route.ts && npx tsx scripts/test-agent-production-e2e.ts"
   },
   "dependencies": {
     "@codemirror/lang-css": "6.3.1",

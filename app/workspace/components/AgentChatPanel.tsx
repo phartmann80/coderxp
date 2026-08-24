@@ -485,7 +485,7 @@ export function AgentChatPanel({
                   handleSaveKey();
                 }
               }}
-              placeholder="sk-ant-..."
+              placeholder="Anthropic API key"
               className="w-full px-2 py-1 text-xs text-gray-100 bg-gray-950 border border-gray-700 rounded font-mono focus:outline-none focus:border-cyan-500"
             />
             {keyError && <p className="text-[11px] text-red-400">{keyError}</p>}

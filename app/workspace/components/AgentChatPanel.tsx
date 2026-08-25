@@ -62,12 +62,20 @@ interface AgentChatPanelProps {
   /** Resolve one exact pending approval by id. */
   onApproveRequest: (approvalId: string) => void;
   onDenyRequest: (approvalId: string) => void;
-  /** M3.9 BYOK state & actions */
+  /** M3.9 BYOK state & actions — only when byokRequired. */
   hasByokKey?: boolean;
   byokStatus?: "unverified" | "active" | "error";
   onSetByokKey?: (key: string) => boolean;
   onClearByokKey?: () => void;
   byokProvider?: "anthropic";
+  /** Provider-neutral status (Logicc / Anthropic). */
+  providerDisplayName?: string;
+  modelDisplayName?: string | null;
+  providerStatus?: "ready" | "unavailable" | "access_restricted" | "loading";
+  byokRequired?: boolean;
+  modelOptions?: readonly { id: string; displayName: string }[];
+  selectedModelId?: string | null;
+  onSelectModel?: (id: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -337,6 +345,13 @@ export function AgentChatPanel({
   byokStatus = "unverified",
   onSetByokKey,
   onClearByokKey,
+  providerDisplayName = "Provider",
+  modelDisplayName = null,
+  providerStatus = "loading",
+  byokRequired = true,
+  modelOptions = [],
+  selectedModelId = null,
+  onSelectModel,
 }: AgentChatPanelProps) {
   const [input, setInput] = useState("");
   const [showKeyModal, setShowKeyModal] = useState(false);
@@ -344,6 +359,20 @@ export function AgentChatPanel({
   const [keyError, setKeyError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const statusLabel =
+    providerStatus === "ready"
+      ? "Ready"
+      : providerStatus === "access_restricted"
+        ? "Access restricted"
+        : providerStatus === "loading"
+          ? "Loading"
+          : "Unavailable";
+
+  const canStream =
+    providerStatus === "ready" && (!byokRequired || hasByokKey);
+
+  const headerModelLabel = modelDisplayName ?? (byokRequired && !hasByokKey ? "Key required" : "—");
 
   useEffect(() => {
     if (listRef.current) {
@@ -402,33 +431,55 @@ export function AgentChatPanel({
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-800 bg-gray-900/50">
         <span className="text-xs text-gray-500 uppercase tracking-wide">Agent</span>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
           <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              hasByokKey
+            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+              canStream
                 ? isStreaming
                   ? "bg-cyan-400 animate-pulse"
                   : "bg-emerald-400"
-                : "bg-amber-400"
+                : providerStatus === "access_restricted"
+                  ? "bg-red-400"
+                  : "bg-amber-400"
             }`}
           />
-          <span className="text-xs text-gray-400 font-mono">
-            {hasByokKey ? "Claude 3.5 Sonnet" : "BYOK Required"}
+          <span className="text-xs text-gray-400 font-mono truncate" title={`${providerDisplayName} · ${headerModelLabel} · ${statusLabel}`}>
+            {providerDisplayName}
+            <span className="text-gray-600"> · </span>
+            {headerModelLabel}
+            <span className="text-gray-600"> · </span>
+            {statusLabel}
           </span>
         </div>
         <div className="ml-auto flex items-center gap-1.5">
-          <button
-            onClick={() => setShowKeyModal(!showKeyModal)}
-            className={`flex items-center gap-1 px-1.5 py-0.5 text-xs rounded border transition-colors ${
-              hasByokKey
-                ? "text-emerald-400 border-emerald-800/60 bg-emerald-950/30 hover:bg-emerald-950/60"
-                : "text-amber-400 border-amber-800/60 bg-amber-950/30 hover:bg-amber-950/60"
-            }`}
-            title="Configure Anthropic API Key (BYOK)"
-          >
-            <Key className="w-3 h-3" />
-            <span>{hasByokKey ? "BYOK Active" : "Set API Key"}</span>
-          </button>
+          {modelOptions.length > 1 && onSelectModel && (
+            <select
+              value={selectedModelId ?? ""}
+              onChange={(e) => onSelectModel(e.target.value)}
+              className="max-w-[140px] px-1 py-0.5 text-[11px] text-gray-300 bg-gray-950 border border-gray-700 rounded"
+              title="Approved model"
+            >
+              {modelOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.displayName}
+                </option>
+              ))}
+            </select>
+          )}
+          {byokRequired && (
+            <button
+              onClick={() => setShowKeyModal(!showKeyModal)}
+              className={`flex items-center gap-1 px-1.5 py-0.5 text-xs rounded border transition-colors ${
+                hasByokKey
+                  ? "text-emerald-400 border-emerald-800/60 bg-emerald-950/30 hover:bg-emerald-950/60"
+                  : "text-amber-400 border-amber-800/60 bg-amber-950/30 hover:bg-amber-950/60"
+              }`}
+              title="Configure API Key (BYOK)"
+            >
+              <Key className="w-3 h-3" />
+              <span>{hasByokKey ? "BYOK Active" : "Set API Key"}</span>
+            </button>
+          )}
           <AgentModeSelector
             mode={permissionMode}
             setMode={onPermissionModeChange}
@@ -456,13 +507,13 @@ export function AgentChatPanel({
         </div>
       </div>
 
-      {/* BYOK Key Modal / Popover */}
-      {showKeyModal && (
+      {/* BYOK Key Modal — Anthropic mode only */}
+      {byokRequired && showKeyModal && (
         <div className="absolute top-10 left-3 right-3 z-30 p-3 bg-gray-900 border border-gray-700 rounded-lg shadow-xl space-y-2.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-200">
               <Key className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Anthropic API Key (BYOK)</span>
+              <span>API Key (BYOK)</span>
             </div>
             <button
               onClick={() => setShowKeyModal(false)}
@@ -485,7 +536,7 @@ export function AgentChatPanel({
                   handleSaveKey();
                 }
               }}
-              placeholder="Anthropic API key"
+              placeholder="API key"
               className="w-full px-2 py-1 text-xs text-gray-100 bg-gray-950 border border-gray-700 rounded font-mono focus:outline-none focus:border-cyan-500"
             />
             {keyError && <p className="text-[11px] text-red-400">{keyError}</p>}
@@ -521,10 +572,10 @@ export function AgentChatPanel({
       )}
 
       {/* Truthful connection state */}
-      {!hasByokKey && (
+      {byokRequired && !hasByokKey && (
         <div className="px-3 py-1.5 border-b border-amber-900/40 bg-amber-950/20 flex items-center justify-between">
           <p className="text-xs text-amber-300/90">
-            Anthropic API key required to stream agent turns.
+            API key required to stream agent turns.
           </p>
           <button
             onClick={() => setShowKeyModal(true)}
@@ -532,6 +583,20 @@ export function AgentChatPanel({
           >
             Connect Key
           </button>
+        </div>
+      )}
+      {!byokRequired && providerStatus === "access_restricted" && (
+        <div className="px-3 py-1.5 border-b border-red-900/40 bg-red-950/20">
+          <p className="text-xs text-red-300/90">
+            Provider access is restricted on this deployment.
+          </p>
+        </div>
+      )}
+      {!byokRequired && providerStatus === "unavailable" && (
+        <div className="px-3 py-1.5 border-b border-amber-900/40 bg-amber-950/20">
+          <p className="text-xs text-amber-300/90">
+            Provider is unavailable. Check server configuration.
+          </p>
         </div>
       )}
 

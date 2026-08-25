@@ -61,6 +61,7 @@ import { useProjectGeneration } from "../hooks/useProjectGeneration";
 import { useAgentExecutionRuntime } from "../hooks/useAgentExecutionRuntime";
 import { useAgentOrchestrator } from "../hooks/useAgentOrchestrator";
 import { useByokCredentials } from "../hooks/useByokCredentials";
+import { useAgentProviderStatus } from "../hooks/useAgentProviderStatus";
 import { HttpAgentTransport } from "@/lib/workspace/agent-http-transport";
 import { AgentProcessStreamBridge } from "@/lib/workspace/agent-process-stream";
 import { getTerminal } from "@/lib/workspace/terminal";
@@ -217,14 +218,31 @@ export function ProjectShell({
     },
   });
 
-  // M3.9 BYOK session-scoped credential manager
+  // M3.9 BYOK session-scoped credential manager (Anthropic mode only)
   const byok = useByokCredentials();
+  const { hasKey: hasByokKey, clearKey: clearByokKey, getApiKey, setKey, status: byokStatus } = byok;
+  const providerStatus = useAgentProviderStatus();
+
+  // Clear any stale browser BYOK when server-owned Logicc mode is active.
+  useEffect(() => {
+    if (!providerStatus.byokRequired && hasByokKey) {
+      clearByokKey();
+    }
+  }, [providerStatus.byokRequired, hasByokKey, clearByokKey]);
+
+  const getSelectedModel = useCallback(
+    () => providerStatus.selectedModelId,
+    [providerStatus.selectedModelId],
+  );
 
   const transport = useMemo(() => {
+    const credentialMode = providerStatus.byokRequired ? "browser-byok" : "server-owned";
     return new HttpAgentTransport({
-      getApiKey: byok.getApiKey,
+      credentialMode,
+      getApiKey: credentialMode === "browser-byok" ? getApiKey : undefined,
+      getModel: getSelectedModel,
     });
-  }, [byok.getApiKey]);
+  }, [getApiKey, providerStatus.byokRequired, getSelectedModel]);
 
   // M3.8 + M3.9 Agent Orchestrator. Owns multi-turn turn loops and transport streaming.
   const orchestrator = useAgentOrchestrator({
@@ -783,10 +801,17 @@ export function ProjectShell({
               pendingApprovals={permissions.pending}
               onApproveRequest={handleApprove}
               onDenyRequest={handleDeny}
-              hasByokKey={byok.hasKey}
-              byokStatus={byok.status}
-              onSetByokKey={byok.setKey}
-              onClearByokKey={byok.clearKey}
+              hasByokKey={hasByokKey}
+              byokStatus={byokStatus}
+              onSetByokKey={setKey}
+              onClearByokKey={clearByokKey}
+              providerDisplayName={providerStatus.displayName}
+              modelDisplayName={providerStatus.selectedModelDisplayName}
+              providerStatus={providerStatus.status}
+              byokRequired={providerStatus.byokRequired}
+              modelOptions={providerStatus.models}
+              selectedModelId={providerStatus.selectedModelId}
+              onSelectModel={providerStatus.setSelectedModelId}
             />
           </div>
         </div>

@@ -6,7 +6,7 @@
  * canonical Server-Sent Events (SSE).
  *
  * Contains zero provider SDKs, zero vendor-specific wire types, and
- * guarantees the BYOK key is never exposed to logs or error objects.
+ * guarantees credentials are never exposed to logs or error objects.
  */
 
 import type {
@@ -15,47 +15,64 @@ import type {
   AgentTransportEvent,
 } from "./agent-transport-types";
 
+export type HttpCredentialMode = "browser-byok" | "server-owned";
+
 export interface HttpAgentTransportOptions {
   endpoint?: string;
-  getApiKey: () => string | null;
+  /** Required when credentialMode is browser-byok. Ignored for server-owned. */
+  getApiKey?: () => string | null;
+  /** Optional model id appended to the JSON body (server validates allowlist). */
+  getModel?: () => string | null;
+  /**
+   * browser-byok: send x-coderxp-byok-key (Anthropic mode).
+   * server-owned: never send BYOK header (Logicc mode).
+   */
+  credentialMode?: HttpCredentialMode;
 }
 
 export class HttpAgentTransport implements AgentTransport {
   private readonly endpoint: string;
-  private readonly getApiKey: () => string | null;
+  private readonly getApiKey: (() => string | null) | undefined;
+  private readonly getModel: (() => string | null) | undefined;
+  private readonly credentialMode: HttpCredentialMode;
 
   constructor(options: HttpAgentTransportOptions) {
     this.endpoint = options.endpoint ?? "/api/agent/stream";
     this.getApiKey = options.getApiKey;
+    this.getModel = options.getModel;
+    this.credentialMode = options.credentialMode ?? "browser-byok";
   }
 
   async *send(
     request: AgentTransportRequest,
     signal: AbortSignal,
   ): AsyncIterable<AgentTransportEvent> {
-    const key = this.getApiKey();
     const turnId = request.turnId;
     const requestId = request.requestId;
 
-    if (!key || typeof key !== "string" || key.trim().length === 0) {
-      yield {
-        type: "turn-started",
-        eventId: `evt-${turnId}-0`,
-        sequence: 0,
-        requestId,
-        turnId,
-        timestamp: Date.now(),
-      };
-      yield {
-        type: "transport-error",
-        eventId: `evt-${turnId}-1`,
-        sequence: 1,
-        requestId,
-        turnId,
-        code: "INVALID_CREDENTIALS",
-        message: "An Anthropic API key is required. Please set your BYOK credential.",
-      };
-      return;
+    let key: string | null = null;
+    if (this.credentialMode === "browser-byok") {
+      key = this.getApiKey?.() ?? null;
+      if (!key || typeof key !== "string" || key.trim().length === 0) {
+        yield {
+          type: "turn-started",
+          eventId: `evt-${turnId}-0`,
+          sequence: 0,
+          requestId,
+          turnId,
+          timestamp: Date.now(),
+        };
+        yield {
+          type: "transport-error",
+          eventId: `evt-${turnId}-1`,
+          sequence: 1,
+          requestId,
+          turnId,
+          code: "INVALID_CREDENTIALS",
+          message: "An API key is required. Please set your BYOK credential.",
+        };
+        return;
+      }
     }
 
     if (signal.aborted) {
@@ -78,15 +95,25 @@ export class HttpAgentTransport implements AgentTransport {
       return;
     }
 
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.credentialMode === "browser-byok" && key) {
+      headers["x-coderxp-byok-key"] = key.trim();
+    }
+
+    const model = this.getModel?.() ?? null;
+    const bodyPayload =
+      model && model.trim().length > 0
+        ? { ...request, model: model.trim() }
+        : request;
+
     let response: Response;
     try {
       response = await fetch(this.endpoint, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-coderxp-byok-key": key.trim(),
-        },
-        body: JSON.stringify(request),
+        headers,
+        body: JSON.stringify(bodyPayload),
         signal,
       });
     } catch (err: unknown) {

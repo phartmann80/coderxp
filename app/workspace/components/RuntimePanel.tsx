@@ -88,6 +88,14 @@ interface RuntimePanelProps {
   byokStatus?: "unverified" | "active" | "error";
   onSetByokKey?: (key: string) => boolean;
   onClearByokKey?: () => void;
+  /** Provider-neutral status */
+  providerDisplayName?: string;
+  modelDisplayName?: string | null;
+  providerStatus?: "ready" | "unavailable" | "access_restricted" | "loading";
+  byokRequired?: boolean;
+  modelOptions?: readonly { id: string; displayName: string }[];
+  selectedModelId?: string | null;
+  onSelectModel?: (id: string) => void;
 }
 
 export function RuntimePanel({
@@ -120,6 +128,13 @@ export function RuntimePanel({
   byokStatus,
   onSetByokKey,
   onClearByokKey,
+  providerDisplayName,
+  modelDisplayName,
+  providerStatus,
+  byokRequired,
+  modelOptions,
+  selectedModelId,
+  onSelectModel,
 }: RuntimePanelProps) {
   const [activeTab, setActiveTab] = useState<PanelTab>("preview");
 
@@ -217,6 +232,13 @@ export function RuntimePanel({
             byokStatus={byokStatus}
             onSetByokKey={onSetByokKey}
             onClearByokKey={onClearByokKey}
+            providerDisplayName={providerDisplayName}
+            modelDisplayName={modelDisplayName}
+            providerStatus={providerStatus}
+            byokRequired={byokRequired}
+            modelOptions={modelOptions}
+            selectedModelId={selectedModelId}
+            onSelectModel={onSelectModel}
           />
         )}
         {activeTab === "preview" && (

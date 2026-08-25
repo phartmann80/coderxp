@@ -1,10 +1,9 @@
 import type {
-  CanonicalAgentMessage,
-  CanonicalToolDefinition,
   AgentTransportRequest,
   AgentTransportEvent,
 } from "../workspace/agent-transport-types";
 import { getManifestTool, isValidManifestTool } from "../workspace/agent-tool-manifest";
+import { SERVER_RESOURCE_LIMITS as SHARED_LIMITS } from "./agent-shared-limits";
 
 // ---------------------------------------------------------------------------
 // Server Model Governance & Resource Limits
@@ -24,19 +23,8 @@ export const MODEL_DISPLAY_NAMES: Record<AllowedModelId, string> = {
   "claude-3-7-sonnet-20250219": "Claude 3.7 Sonnet",
 };
 
-export const SERVER_RESOURCE_LIMITS = {
-  maxRequestBodyBytes: 1024 * 1024, // 1 MB
-  maxMessages: 100,
-  maxTools: 20,
-  maxTokensLimit: 8192,
-  minTokensLimit: 1,
-  defaultMaxTokens: 4096,
-  minTemperature: 0.0,
-  maxTemperature: 1.0,
-  defaultTemperature: 0.0,
-  streamTimeoutMs: 180_000, // 3 minutes
-  connectTimeoutMs: 15_000,
-} as const;
+/** Re-export shared limits under the historical Anthropic adapter name. */
+export const SERVER_RESOURCE_LIMITS = SHARED_LIMITS;
 
 // ---------------------------------------------------------------------------
 // Anthropic Wire Format Types (Server-Only)

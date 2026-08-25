@@ -1,20 +1,27 @@
 /**
- * Server-only agent stream handler for CoderXP M3.9.
+ * Server-only agent stream handler for CoderXP M3.9+.
  *
- * Production binds fetch/clock/timers to the Node runtime. Tests bind the same
- * handler to a deterministic fake upstream. The Anthropic origin is fixed here
- * and is never taken from the HTTP request or the browser.
+ * Production binds fetch/clock/timers and the active provider adapter.
+ * Tests bind the same handler to a deterministic fake upstream.
+ * Upstream origins are fixed inside provider adapters and are never taken
+ * from the HTTP request or the browser.
+ *
+ * Timeout, cancellation, limits, concurrency, and terminal-once behavior
+ * remain centralized here.
  */
 
-import {
-  validateAndTranslateRequest,
-  AnthropicStreamTranslator,
-  SERVER_RESOURCE_LIMITS,
-} from "./agent-anthropic-adapter";
+import { prepareLogiccTranslation } from "./agent-logicc-adapter";
+import { createAnthropicByokAdapter } from "./agent-anthropic-byok-adapter";
+import { isSameOriginRequest } from "./agent-same-origin";
+import { SERVER_RESOURCE_LIMITS } from "./agent-shared-limits";
+import type { AgentProviderAdapter } from "./agent-provider-types";
 import type { AgentTransportRequest, AgentTransportEvent } from "../workspace/agent-transport-types";
 
-export const PRODUCTION_ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
-export const PRODUCTION_ANTHROPIC_VERSION = "2023-06-01";
+export {
+  PRODUCTION_ANTHROPIC_MESSAGES_URL,
+  PRODUCTION_ANTHROPIC_VERSION,
+} from "./agent-anthropic-byok-adapter";
+
 export const MAX_GLOBAL_CONCURRENT_STREAMS = 50;
 
 export type AgentStreamLimits = {
@@ -63,19 +70,13 @@ export interface AgentStreamHandlerDeps {
   cancelTimeout: (id: unknown) => void;
   limits: AgentStreamLimits;
   concurrency: ConcurrencyGate;
+  /** Active provider adapter. Defaults to Anthropic BYOK for backward-compatible tests. */
+  provider?: AgentProviderAdapter;
+  /** When true, skip same-origin check (unit tests). Production leaves this false. */
+  skipSameOriginCheck?: boolean;
 }
 
 type AbortCause = "none" | "client" | "connect-timeout" | "stream-timeout";
-
-function isHeaderSafeApiKey(key: string): boolean {
-  if (typeof key !== "string" || key.trim().length === 0) return false;
-  if (key.length > 256) return false;
-  for (let i = 0; i < key.length; i++) {
-    const code = key.charCodeAt(i);
-    if (code < 33 || code > 126) return false;
-  }
-  return true;
-}
 
 function jsonError(errorCode: string, message: string, status: number): Response {
   return Response.json({ errorCode, message }, { status });
@@ -84,24 +85,36 @@ function jsonError(errorCode: string, message: string, status: number): Response
 export function createAgentStreamHandler(
   deps: AgentStreamHandlerDeps,
 ): (req: Request) => Promise<Response> {
+  const provider = deps.provider ?? createAnthropicByokAdapter();
+
   return async function handleAgentStream(req: Request): Promise<Response> {
+    if (!deps.skipSameOriginCheck && !isSameOriginRequest(req)) {
+      return jsonError("ACCESS_RESTRICTED", "Cross-origin agent requests are not allowed.", 403);
+    }
+
     const contentType = req.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
       return jsonError("INVALID_REQUEST", "Content-Type must be application/json.", 400);
     }
 
-    let byokKey = req.headers.get("x-coderxp-byok-key")?.trim() ?? "";
-    if (!isHeaderSafeApiKey(byokKey)) {
-      byokKey = "";
+    const browserByokHeader = req.headers.get("x-coderxp-byok-key");
+
+    // Logicc mode: do not require, read for auth, or preserve BYOK.
+    // Anthropic BYOK: credential session validates the header.
+    const credentialResult = provider.beginCredentialSession(
+      provider.requiresBrowserByok() ? browserByokHeader : null,
+    );
+    if (!credentialResult.ok) {
       return jsonError(
-        "INVALID_CREDENTIALS",
-        "A valid Anthropic API key is required. Please provide your BYOK credential.",
-        401,
+        credentialResult.errorCode,
+        credentialResult.message,
+        credentialResult.status,
       );
     }
+    const credentialSession = credentialResult.session;
 
     if (!deps.concurrency.tryAcquire()) {
-      byokKey = "";
+      credentialSession.release();
       return jsonError("RATE_LIMITED", "Server capacity reached. Please try again shortly.", 429);
     }
 
@@ -118,13 +131,13 @@ export function createAgentStreamHandler(
       rawBodyText = await req.text();
     } catch {
       releaseConcurrency();
-      byokKey = "";
+      credentialSession.release();
       return jsonError("INVALID_REQUEST", "Failed to read request body.", 400);
     }
 
     if (Buffer.byteLength(rawBodyText, "utf8") > deps.limits.maxRequestBodyBytes) {
       releaseConcurrency();
-      byokKey = "";
+      credentialSession.release();
       return jsonError("REQUEST_TOO_LARGE", "Request body exceeds maximum limit (1 MB).", 413);
     }
 
@@ -133,21 +146,31 @@ export function createAgentStreamHandler(
       parsedBody = JSON.parse(rawBodyText);
     } catch {
       releaseConcurrency();
-      byokKey = "";
+      credentialSession.release();
       return jsonError("INVALID_REQUEST", "Malformed JSON payload.", 400);
     }
 
     const transportReq = parsedBody as unknown as AgentTransportRequest;
-    const translationResult = validateAndTranslateRequest(transportReq, {
+    const requestOptions = {
       model: typeof parsedBody.model === "string" ? parsedBody.model : undefined,
-      temperature: typeof parsedBody.temperature === "number" ? parsedBody.temperature : undefined,
+      temperature:
+        typeof parsedBody.temperature === "number" ? parsedBody.temperature : undefined,
       maxTokens: typeof parsedBody.maxTokens === "number" ? parsedBody.maxTokens : undefined,
-    });
+    };
+
+    const translationResult =
+      provider.id === "logicc"
+        ? await prepareLogiccTranslation(provider, transportReq, requestOptions)
+        : provider.validateAndTranslateRequest(transportReq, requestOptions);
 
     if (!translationResult.ok) {
       releaseConcurrency();
-      byokKey = "";
-      return jsonError(translationResult.errorCode, translationResult.message, translationResult.status);
+      credentialSession.release();
+      return jsonError(
+        translationResult.errorCode,
+        translationResult.message,
+        translationResult.status,
+      );
     }
 
     const requestId = transportReq.requestId || `req-${deps.clock()}`;
@@ -168,8 +191,7 @@ export function createAgentStreamHandler(
 
     const encoder = new TextEncoder();
     const upstreamBody = JSON.stringify(translationResult.body);
-    const apiKeyHeader = byokKey;
-    byokKey = "";
+    const upstreamUrl = provider.getUpstreamUrl();
 
     const responseStream = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -206,6 +228,7 @@ export function createAgentStreamHandler(
           isClosed = true;
           clearConnectTimer();
           clearStreamTimer();
+          credentialSession.release();
           releaseConcurrency();
           try {
             controller.close();
@@ -214,7 +237,16 @@ export function createAgentStreamHandler(
           }
         };
 
-        const translator = new AnthropicStreamTranslator(requestId, turnId, (event) => {
+        let terminalSeen = false;
+        const translator = provider.createStreamTranslator(requestId, turnId, (event) => {
+          if (terminalSeen) return;
+          if (
+            event.type === "turn-completed" ||
+            event.type === "transport-error" ||
+            event.type === "transport-cancelled"
+          ) {
+            terminalSeen = true;
+          }
           safeEnqueue(event);
         });
 
@@ -238,13 +270,14 @@ export function createAgentStreamHandler(
         }, deps.limits.connectTimeoutMs);
 
         try {
-          const upstreamResponse = await deps.fetchUpstream(PRODUCTION_ANTHROPIC_MESSAGES_URL, {
+          const headers: Record<string, string> = {
+            "content-type": "application/json",
+          };
+          credentialSession.applyAuth(headers);
+
+          const upstreamResponse = await deps.fetchUpstream(upstreamUrl, {
             method: "POST",
-            headers: {
-              "content-type": "application/json",
-              "x-api-key": apiKeyHeader,
-              "anthropic-version": PRODUCTION_ANTHROPIC_VERSION,
-            },
+            headers,
             body: upstreamBody,
             signal: abortController.signal,
           });
@@ -261,27 +294,17 @@ export function createAgentStreamHandler(
           armStreamTimer();
 
           if (!upstreamResponse.ok) {
-            let errorCode = "UPSTREAM_ERROR";
-            let errorMsg = `Upstream provider returned HTTP ${upstreamResponse.status}.`;
-
-            if (upstreamResponse.status === 401 || upstreamResponse.status === 403) {
-              errorCode = "INVALID_CREDENTIALS";
-              errorMsg = "Provided Anthropic API key was rejected by the provider.";
-            } else if (upstreamResponse.status === 429) {
-              errorCode = "RATE_LIMITED";
-              errorMsg = "Anthropic rate limit exceeded. Please wait before retrying.";
-            } else if (upstreamResponse.status >= 500) {
-              errorCode = "PROVIDER_UNAVAILABLE";
-              errorMsg = "Anthropic service is temporarily unavailable.";
-            }
-
-            translator.emitTerminalError(errorCode, errorMsg);
+            const normalized = provider.normalizeHttpError(upstreamResponse.status);
+            translator.emitTerminalError(normalized.errorCode, normalized.message);
             closeStream();
             return;
           }
 
           if (!upstreamResponse.body) {
-            translator.emitTerminalError("UPSTREAM_PROTOCOL_ERROR", "Upstream response body was empty.");
+            translator.emitTerminalError(
+              "UPSTREAM_PROTOCOL_ERROR",
+              "Upstream response body was empty.",
+            );
             closeStream();
             return;
           }
@@ -302,23 +325,7 @@ export function createAgentStreamHandler(
               const trimmed = line.trim();
               if (trimmed.startsWith("data:")) {
                 const dataStr = trimmed.slice(5).trim();
-                if (dataStr === "[DONE]") {
-                  if (!translator.isTerminalCommitted()) {
-                    translator.emitTerminalCompleted("stop");
-                  }
-                  continue;
-                }
-
-                try {
-                  const eventObj = JSON.parse(dataStr) as Record<string, unknown>;
-                  translator.handleAnthropicEvent(eventObj);
-                } catch {
-                  translator.emitTerminalError(
-                    "UPSTREAM_PROTOCOL_ERROR",
-                    "Failed to parse upstream event data.",
-                  );
-                  break;
-                }
+                translator.handleDataPayload(dataStr);
               }
             }
 
@@ -328,10 +335,7 @@ export function createAgentStreamHandler(
           }
 
           if (!translator.isTerminalCommitted()) {
-            translator.emitTerminalError(
-              "UPSTREAM_PREMATURE_CLOSE",
-              "Upstream stream closed without a terminal completion event.",
-            );
+            translator.notifyStreamEnded();
           }
         } catch {
           if (!translator.isTerminalCommitted()) {
@@ -356,6 +360,7 @@ export function createAgentStreamHandler(
       cancel() {
         if (abortCause === "none") abortCause = "client";
         abortController.abort();
+        credentialSession.release();
         releaseConcurrency();
       },
     });

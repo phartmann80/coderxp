@@ -135,7 +135,8 @@ async function main(): Promise<void> {
     90000,
   );
   console.log(`state_after_turn2=${afterTurn2}`);
-  console.log(`tool_executed=${counters.toolExecuted}`);
+  const toolCount: number = counters.toolExecuted;
+  console.log(`tool_executed=${toolCount}`);
 
   const messages = orchestrator.getMessages();
   assertNoSecret("messages", messages);
@@ -144,7 +145,7 @@ async function main(): Promise<void> {
 
   const ok =
     afterTurn2 === "completed" &&
-    counters.toolExecuted === 1 &&
+    toolCount === 1 &&
     messages.some((m) => m.role === "tool") &&
     messages.filter((m) => m.role === "assistant").length >= 2;
 

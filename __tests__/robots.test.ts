@@ -3,10 +3,12 @@ import robotsFn from "@/app/robots";
 
 describe("robots.ts — dynamic robots route", () => {
   const robots = robotsFn();
+  // `rules` is typed as a single rule or an array of rules; this route returns a single rule.
+  const rules = robots.rules as Exclude<typeof robots.rules, unknown[]>;
 
   it("should allow all user agents", () => {
-    expect(robots.rules.userAgent).toBe("*");
-    expect(robots.rules.allow).toBe("/");
+    expect(rules.userAgent).toBe("*");
+    expect(rules.allow).toBe("/");
   });
 
   it("should point sitemap to coderxp.pro", () => {

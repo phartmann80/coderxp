@@ -51,11 +51,13 @@ LOGICC_INTERNAL_MODE=true
 → not suitable for public internet exposure
 ```
 
-`/api/agent/stream` is **not** safe for a public deployment merely because internal mode is enabled. Anyone who can open the CoderXP web application in that deployment may potentially spend the server-owned Logicc account.
+`/api/agent/stream` is **not** safe for a public deployment merely because internal mode is enabled. Anyone who can open the CoderXP web application in that deployment may potentially spend the server-owned Logicc account. **Server-owned model usage incurs project costs.** Global concurrency/size/timeout limits are not per-user quotas.
 
 Same-origin checks on agent routes are **request-origin validation** (cross-site request mitigation). They are **not** user authentication.
 
-Do **not** expose Logicc mode on the public internet without real application authentication or trusted reverse-proxy access control. Keep the application server port unreachable from the public internet behind any reverse proxy.
+During local testing, bind the HTTP listener to localhost/private interfaces only. Do **not** expose Logicc mode on the public internet without real application authentication or trusted reverse-proxy access control. Keep the application server port unreachable from the public internet behind any reverse proxy.
+
+Credential source for private testing may be either a gitignored `.env.local` or a process/environment secret injection. Both are acceptable only if the value remains server-only and untracked. For self-hosted production, supply the key through the selected server secret mechanism — never commit it.
 
 #### Local `.env.local` template (names and non-secret examples only)
 

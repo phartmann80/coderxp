@@ -2,6 +2,9 @@
  * Live Logicc orchestrator smoke: stream → tool call → M3.6 approval →
  * execute once → continuation → final response. Localhost only.
  * Never prints credentials or raw upstream payloads.
+ *
+ * Manual/local-only — not part of npm test / CI.
+ * executeTool is an in-memory stub (no filesystem writes).
  */
 
 import { AgentOrchestrator } from "../lib/workspace/agent-orchestrator";
@@ -10,7 +13,23 @@ import { AgentExecutionRuntime } from "../lib/workspace/agent-execution-runtime"
 import { AgentPermissionController } from "../lib/workspace/agent-permissions";
 import type { AgentToolResult } from "../lib/workspace/agent-tools";
 
-const BASE = process.env.SMOKE_BASE_URL ?? "http://127.0.0.1:3000";
+function requireLoopbackBase(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("SMOKE_BASE_URL must be a valid loopback URL");
+  }
+  const host = url.hostname.toLowerCase();
+  const allowed =
+    host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
+  if (!allowed || (url.protocol !== "http:" && url.protocol !== "https:")) {
+    throw new Error("Smoke helpers may only target loopback hosts (127.0.0.1/localhost/::1)");
+  }
+  return url.origin;
+}
+
+const BASE = requireLoopbackBase(process.env.SMOKE_BASE_URL ?? "http://127.0.0.1:3000");
 const MODEL = process.env.SMOKE_MODEL_ID ?? "azure/gpt-4o-mini";
 
 function assertNoSecret(label: string, value: unknown): void {
@@ -39,7 +58,8 @@ async function main(): Promise<void> {
   console.log("===== LOGICC LIVE ORCHESTRATOR SMOKE =====");
   console.log(`base=${BASE} model=${MODEL}`);
 
-  let toolExecuted = 0;
+  // Object counter avoids TS control-flow narrowing after pre-approval checks.
+  const counters = { toolExecuted: 0 };
   const permissionCtrl = new AgentPermissionController();
   permissionCtrl.setMode("ask");
 
@@ -48,9 +68,10 @@ async function main(): Promise<void> {
     generation: 1,
     controller: permissionCtrl,
     executeTool: async (name): Promise<AgentToolResult<unknown>> => {
-      toolExecuted += 1;
-      console.log(`tool_execute name=${name} count=${toolExecuted}`);
-      return { ok: true, data: { files: ["README.md", "package.json"] } };
+      counters.toolExecuted += 1;
+      console.log(`tool_execute name=${name} count=${counters.toolExecuted}`);
+      // In-memory stub only — does not write project files.
+      return { ok: true, data: { path: "smoke-live.txt", written: true, stub: true } };
     },
     scheduleDrain: (fn) => queueMicrotask(fn),
   });
@@ -95,7 +116,7 @@ async function main(): Promise<void> {
     console.error("LIVE_ORCH:FAILED expected one approval");
     process.exit(1);
   }
-  if (toolExecuted !== 0) {
+  if (counters.toolExecuted !== 0) {
     console.error("LIVE_ORCH:FAILED tool ran before approval");
     process.exit(1);
   }
@@ -114,7 +135,7 @@ async function main(): Promise<void> {
     90000,
   );
   console.log(`state_after_turn2=${afterTurn2}`);
-  console.log(`tool_executed=${toolExecuted}`);
+  console.log(`tool_executed=${counters.toolExecuted}`);
 
   const messages = orchestrator.getMessages();
   assertNoSecret("messages", messages);
@@ -123,7 +144,7 @@ async function main(): Promise<void> {
 
   const ok =
     afterTurn2 === "completed" &&
-    toolExecuted === 1 &&
+    counters.toolExecuted === 1 &&
     messages.some((m) => m.role === "tool") &&
     messages.filter((m) => m.role === "assistant").length >= 2;
 

@@ -4,13 +4,31 @@
  * Never prints LOGICC_API_KEY, Authorization headers, or raw upstream bodies.
  * Reports only sanitized pass/fail, model ids, event types, and safe error codes.
  *
- * Usage (server already running with Logicc env):
+ * Manual/local-only — not part of npm test / CI.
+ *
+ * Usage (server already running with Logicc env on loopback):
  *   npx tsx scripts/smoke-logicc-live.ts
  */
 
 import { CANONICAL_TOOL_MANIFEST } from "../lib/workspace/agent-tool-manifest";
 
-const BASE = process.env.SMOKE_BASE_URL ?? "http://127.0.0.1:3000";
+function requireLoopbackBase(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("SMOKE_BASE_URL must be a valid loopback URL");
+  }
+  const host = url.hostname.toLowerCase();
+  const allowed =
+    host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
+  if (!allowed || (url.protocol !== "http:" && url.protocol !== "https:")) {
+    throw new Error("Smoke helpers may only target loopback hosts (127.0.0.1/localhost/::1)");
+  }
+  return url.origin;
+}
+
+const BASE = requireLoopbackBase(process.env.SMOKE_BASE_URL ?? "http://127.0.0.1:3000");
 const MODEL = process.env.SMOKE_MODEL_ID ?? "";
 
 type Result = { name: string; ok: boolean; detail?: string };
@@ -27,9 +45,6 @@ function assertNoSecret(label: string, text: string): void {
   const key = process.env.LOGICC_API_KEY ?? "";
   if (key && text.includes(key)) {
     throw new Error(`Credential appeared in ${label}`);
-  }
-  if (/Bearer\s+\S+/i.test(text) && text.includes("Authorization")) {
-    // Only fail if we somehow echoed auth material in our own logs/payloads under test
   }
 }
 

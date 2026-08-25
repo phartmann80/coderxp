@@ -41,7 +41,7 @@ export default function HomePage() {
           CoderXP is an AI software engineering workspace in development. Bring-your-own-keys, local model bridge, and real execution are core goals of the roadmap.
         </p>
 
-        {/* Call To Action Buttons */}
+        {/* Call to Action Buttons */}
         <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
           <Link
             href="/workspace"
@@ -166,7 +166,7 @@ export default function HomePage() {
               <ul className="space-y-2 text-xs text-gray-400 font-mono">
                 <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Simulated fake typing animations</li>
                 <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Forced monthly API token markups</li>
-                <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Cliché purple/magenta glow themes</li>
+                <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Clickbait purple/magenta glow themes</li>
                 <li className="flex items-center gap-2"><X className="w-3.5 h-3.5 text-red-400" /> Single-provider vendor lock-in</li>
               </ul>
             </div>
@@ -180,7 +180,7 @@ export default function HomePage() {
                 <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> Real terminal stdout/stderr stream execution (Planned)</li>
                 <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> BYOK First: OpenAI, Anthropic, Gemini, DeepSeek, Local (Planned)</li>
                 <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-emerald-400" /> Obsidian titanium developer-first aesthetic</li>
-                <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> Open standards &amp; exportable repositories (Planned)</li>
+                <li className="flex items-center gap-2"><ArrowRight className="w-3.5 h-3.5 text-emerald-400" /> Open standards &amp; project ZIP export (M2)</li>
               </ul>
             </div>
 

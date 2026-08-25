@@ -25,7 +25,7 @@ export default function FeaturesPage() {
       title: "3-Panel Signature Workspace",
       desc: "Adaptable three-panel layout featuring context history on the left, syntax-highlighted editor in center, and live preview runner on the right.",
       icon: Layers,
-      capabilityStatus: "Milestone 4 (Planned)",
+      capabilityStatus: "Milestone 2 (In Progress)",
     },
     {
       title: "AST Code Diffing & Review",
@@ -37,7 +37,7 @@ export default function FeaturesPage() {
       title: "Interactive Sandbox Live Preview",
       desc: "Every project renders inside an isolated live preview runner supporting desktop, tablet, and mobile viewports.",
       icon: Eye,
-      capabilityStatus: "Milestone 4 (Planned)",
+      capabilityStatus: "Milestone 2 (In Progress)",
     },
   ];
 

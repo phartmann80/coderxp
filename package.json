@@ -10,9 +10,18 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "npx tsx scripts/test-agent-permissions.ts && npx tsx scripts/test-agent-execution-runtime.ts && npx tsx scripts/test-agent-runtime-adapter.ts && npx tsx scripts/test-agent-orchestrator.ts && npx tsx scripts/test-agent-anthropic-adapter.ts && npx tsx scripts/test-agent-stream-route.ts && npx tsx scripts/test-agent-production-e2e.ts && npx tsx scripts/test-agent-logicc-provider.ts && npx tsx scripts/test-agent-logicc-adapter.ts && npx tsx scripts/test-agent-logicc-e2e.ts"
   },
   "dependencies": {
+    "@codemirror/lang-css": "6.3.1",
+    "@codemirror/lang-html": "6.4.11",
+    "@codemirror/lang-javascript": "6.2.5",
+    "@codemirror/lang-json": "6.0.2",
+    "@uiw/react-codemirror": "4.25.11",
+    "@webcontainer/api": "1.6.4",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/addon-web-links": "0.11.0",
+    "@xterm/xterm": "5.5.0",
     "clsx": "^2.1.1",
     "framer-motion": "^11.18.2",
     "lucide-react": "^0.474.0",
@@ -30,8 +39,7 @@
     "eslint-config-next": "16.3.0",
     "postcss": "^8.5.1",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.3",
-    "vitest": "^3.2.4"
+    "typescript": "^5.7.3"
   },
   "overrides": {
     "glob": "^10.4.0",

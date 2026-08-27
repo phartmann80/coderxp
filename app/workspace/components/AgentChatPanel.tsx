@@ -39,7 +39,7 @@ import { McpServerModal } from "./McpServerModal";
 import {
   BYOK_PROVIDER_DEFS,
   type ByokProviderId,
-  type SavedByokConfig,
+  fetchServerByokRecords,
 } from "@/lib/workspace/byok-providers";
 
 export interface GrantedFolder {
@@ -268,27 +268,20 @@ export function AgentChatPanel({
   >([]);
 
   const loadSavedByok = useCallback(() => {
-    const groups: Array<{ providerId: string; name: string; models: Array<{ id: string; name: string }> }> = [];
-    for (const [pId, def] of Object.entries(BYOK_PROVIDER_DEFS)) {
-      try {
-        const raw = localStorage.getItem(`coderxp_byok_${pId}`);
-        if (raw) {
-          const config = JSON.parse(raw) as SavedByokConfig;
-          const models =
-            config.customModels && config.customModels.length > 0
-              ? config.customModels.map((m) => ({ id: `byok/${pId}/${m.id}`, name: `${m.name}` }))
-              : def.defaultModels.map((m) => ({ id: `byok/${pId}/${m.id}`, name: `${m.name}` }));
-          groups.push({
-            providerId: pId,
-            name: def.name,
-            models,
-          });
-        }
-      } catch {
-        // ignore
+    fetchServerByokRecords().then((records) => {
+      const groups: Array<{ providerId: string; name: string; models: Array<{ id: string; name: string }> }> = [];
+      for (const rec of records) {
+        groups.push({
+          providerId: rec.providerId,
+          name: rec.displayName,
+          models: rec.models.map((m) => ({
+            id: `byok/${rec.providerId}/${m.id}`,
+            name: m.isOfflineFallback ? `${m.name}` : `${m.name}`,
+          })),
+        });
       }
-    }
-    setByokGroups(groups);
+      setByokGroups(groups);
+    });
   }, []);
 
   useEffect(() => {

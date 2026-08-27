@@ -4,19 +4,20 @@
  * BYOK Provider Configuration Modal for CoderXP Revision 2.3.
  *
  * Implements Directive §10.2 & §10.3:
- * - Multi-provider configuration with key masking (…last4)
- * - Live validation probe on save
- * - Revocation removes keys and model optgroups immediately
+ * - Sends key once over HTTPS to server secrets store
+ * - Stores encrypted server-side; client never retains plaintext or full ciphertext
+ * - Displays only maskedKey (…last4) and live discovered models
+ * - Ollama-local exception handled in browser-direct memory
  */
 
 import React, { useState, useEffect } from "react";
 import {
   BYOK_PROVIDER_DEFS,
   type ByokProviderId,
-  type SavedByokConfig,
-  validateProviderKey,
+  saveByokKeyToServer,
+  fetchServerByokRecords,
+  revokeByokKeyOnServer,
 } from "@/lib/workspace/byok-providers";
-import { maskApiKey, encryptSecret, decryptSecret } from "@/lib/workspace/byok-crypto";
 
 export interface ByokProviderModalProps {
   isOpen: boolean;
@@ -52,7 +53,7 @@ export function ByokProviderModal({
     }
   }, [initialProviderId]);
 
-  // Load saved config for the selected provider
+  // Load server-persisted state for the selected provider
   useEffect(() => {
     if (!isOpen) return;
 
@@ -61,26 +62,19 @@ export function ByokProviderModal({
     setApiKey("");
     setShowPlainKey(false);
 
-    try {
-      const raw = localStorage.getItem(`coderxp_byok_${selectedProvider}`);
-      if (raw) {
-        const config = JSON.parse(raw) as SavedByokConfig;
+    fetchServerByokRecords().then((records) => {
+      const match = records.find((r) => r.providerId === selectedProvider);
+      if (match) {
         setIsSaved(true);
-        setMaskedKey(config.maskedKey || "");
-        setBaseUrl(config.baseUrl || "");
-        if (config.mode) setOllamaMode(config.mode);
-        // Asynchronously decrypt key for display if user toggles plaintext
-        decryptSecret(config.encryptedKey).then((dec) => {
-          if (dec) setApiKey(dec);
-        });
+        setMaskedKey(match.maskedKey);
+        setBaseUrl(match.baseUrl || "");
+        if (match.mode) setOllamaMode(match.mode);
       } else {
         setIsSaved(false);
         setMaskedKey("");
         setBaseUrl(def.defaultBaseUrl || "");
       }
-    } catch {
-      setIsSaved(false);
-    }
+    });
   }, [isOpen, selectedProvider, def.defaultBaseUrl]);
 
   if (!isOpen) return null;
@@ -90,51 +84,36 @@ export function ByokProviderModal({
     setValidationError(null);
     setValidationSuccess(null);
 
-    const validation = await validateProviderKey(selectedProvider, apiKey, {
+    const res = await saveByokKeyToServer(selectedProvider, apiKey, {
       baseUrl: baseUrl.trim() || undefined,
       mode: selectedProvider === "ollama" ? ollamaMode : undefined,
     });
 
-    if (!validation.ok) {
-      setValidating(false);
-      setValidationError(validation.error || "Validation failed.");
+    setValidating(false);
+    if (!res.ok || !res.record) {
+      setValidationError(res.error || "Failed to validate or save credentials.");
       return;
     }
 
-    try {
-      const encrypted = await encryptSecret(apiKey.trim());
-      const masked = maskApiKey(apiKey.trim());
-
-      const config: SavedByokConfig = {
-        providerId: selectedProvider,
-        encryptedKey: encrypted,
-        maskedKey: masked,
-        baseUrl: baseUrl.trim() || undefined,
-        mode: selectedProvider === "ollama" ? ollamaMode : undefined,
-        customModels: validation.models,
-        updatedAt: Date.now(),
-      };
-
-      localStorage.setItem(`coderxp_byok_${selectedProvider}`, JSON.stringify(config));
-      setIsSaved(true);
-      setMaskedKey(masked);
-      setValidating(false);
-      setValidationSuccess(`Validated! ${validation.models?.length || 0} models available.`);
-      onSaved(selectedProvider);
-    } catch (err: any) {
-      setValidating(false);
-      setValidationError(err.message || "Failed to save key.");
-    }
+    setIsSaved(true);
+    setMaskedKey(res.record.maskedKey);
+    setApiKey(""); // Clear full key from client state immediately
+    setValidationSuccess(
+      `Validated! ${res.record.models.length} live model(s) discovered and active.`,
+    );
+    onSaved(selectedProvider);
   }
 
-  function handleRevoke() {
-    localStorage.removeItem(`coderxp_byok_${selectedProvider}`);
-    setIsSaved(false);
-    setMaskedKey("");
-    setApiKey("");
-    setValidationSuccess(null);
-    setValidationError(null);
-    onRevoked(selectedProvider);
+  async function handleRevoke() {
+    const success = await revokeByokKeyOnServer(selectedProvider);
+    if (success) {
+      setIsSaved(false);
+      setMaskedKey("");
+      setApiKey("");
+      setValidationSuccess(null);
+      setValidationError(null);
+      onRevoked(selectedProvider);
+    }
   }
 
   return (
@@ -152,7 +131,7 @@ export function ByokProviderModal({
               <path d="M21 2l-2 2m-1.5 1.5L10 13l-4 4-4-4 4-4 7.5-7.5" />
             </svg>
             <h2 id="byokModalTitle" className="text-sm font-semibold">
-              Bring Your Own Key (BYOK)
+              Bring Your Own Key (Server Secrets Store)
             </h2>
           </div>
           <button
@@ -170,7 +149,7 @@ export function ByokProviderModal({
 
         {/* Body */}
         <div className="p-4 flex flex-col gap-4 text-xs">
-          {/* Provider selector tabs */}
+          {/* Provider selector */}
           <div>
             <label className="block text-[var(--text-dim)] mb-1 font-medium">Select Provider</label>
             <select
@@ -186,13 +165,13 @@ export function ByokProviderModal({
             </select>
           </div>
 
-          {/* Provider info banner */}
+          {/* Provider status banner */}
           <div className="p-2.5 rounded bg-[var(--bg-input)] border border-[var(--border-soft)] flex items-center justify-between text-[11px] text-[var(--text-dim)]">
             <span>
               {isSaved ? (
-                <span className="text-[var(--ok)] font-medium">Active: key saved ({maskedKey})</span>
+                <span className="text-[var(--ok)] font-medium">Active: key stored securely ({maskedKey})</span>
               ) : (
-                <span>No key configured for {def.name}</span>
+                <span>No key configured on server for {def.name}</span>
               )}
             </span>
             {def.helpUrl && (
@@ -212,8 +191,8 @@ export function ByokProviderModal({
 
           {/* Ollama Mode Selector */}
           {selectedProvider === "ollama" && (
-            <div>
-              <label className="block text-[var(--text-dim)] mb-1 font-medium">Ollama Mode</label>
+            <div className="flex flex-col gap-2">
+              <label className="block text-[var(--text-dim)] mb-0.5 font-medium">Ollama Mode</label>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -238,6 +217,13 @@ export function ByokProviderModal({
                   Remote / Cloud Endpoint
                 </button>
               </div>
+              {ollamaMode === "local" && (
+                <div className="text-[11px] text-[var(--text-faint)] leading-relaxed bg-[var(--bg-side)] p-2 rounded border border-[var(--border-soft)]">
+                  Note: To allow browser access, launch Ollama with CORS origins enabled:
+                  <br />
+                  <code className="text-[var(--text-dim)] font-mono">OLLAMA_ORIGINS=&quot;*&quot; ollama serve</code>
+                </div>
+              )}
             </div>
           )}
 
@@ -259,7 +245,8 @@ export function ByokProviderModal({
           {(selectedProvider !== "ollama" || ollamaMode === "cloud") && (
             <div>
               <label className="block text-[var(--text-dim)] mb-1 font-medium">
-                API Key {isSaved && <span className="text-[var(--text-faint)] font-normal">({maskedKey})</span>}
+                {isSaved ? "Update API Key" : "Enter API Key"}{" "}
+                {isSaved && <span className="text-[var(--text-faint)] font-normal">({maskedKey})</span>}
               </label>
               <div className="relative flex items-center">
                 <input
@@ -335,7 +322,7 @@ export function ByokProviderModal({
               {validating && (
                 <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
               )}
-              <span>{validating ? "Testing..." : "Validate & Save"}</span>
+              <span>{validating ? "Validating on Server..." : "Save to Server"}</span>
             </button>
           </div>
         </div>

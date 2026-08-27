@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { maskApiKey, encryptSecret, decryptSecret } from "../lib/workspace/byok-crypto";
 import {
   BYOK_PROVIDER_DEFS,
-  validateProviderKey,
   type ByokProviderId,
 } from "../lib/workspace/byok-providers";
+import { saveServerByok } from "../lib/workspace/byok-server-store";
 
 async function main() {
   console.log("=== RUNNING REVISION 2.3 BYOK PROVIDERS TEST ===");
@@ -54,13 +54,13 @@ async function main() {
 
   // 4. Custom Provider SSRF Guard
   console.log("--- 4. SSRF Guard on Custom Base URL ---");
-  const loopbackCustom = await validateProviderKey("custom", "key-123", {
+  const loopbackCustom = await saveServerByok("test_user", "custom", "key-123", {
     baseUrl: "http://127.0.0.1:8080/v1",
   });
   assert.equal(loopbackCustom.ok, false, "Localhost/loopback base URL is rejected by SSRF guard");
   assert.ok(loopbackCustom.error?.includes("Invalid or forbidden Base URL"));
 
-  const metadataCustom = await validateProviderKey("custom", "key-123", {
+  const metadataCustom = await saveServerByok("test_user", "custom", "key-123", {
     baseUrl: "http://169.254.169.254/v1",
   });
   assert.equal(metadataCustom.ok, false, "Cloud metadata base URL is rejected by SSRF guard");

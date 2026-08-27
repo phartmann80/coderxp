@@ -1,10 +1,11 @@
 /**
  * BYOK Provider Registry and Model Definitions for CoderXP Revision 2.3.
  *
- * Implements Directive §10.2 & §10.3:
+ * Implements Directive §10.2, §10.3 & Review Note Updates:
  * - Multi-provider configuration for Anthropic, OpenAI, Gemini, Mistral,
  *   OpenRouter, Ollama (local + cloud), Grok (xAI), Hugging Face, and Custom.
- * - Validation probes to populate live model optgroups.
+ * - Server-side key storage and proxying (full key never kept on client).
+ * - Live dynamic models discovery (static models used solely as marked offline fallbacks).
  * - Client-only execution for Ollama Local (localhost:11434).
  */
 
@@ -26,6 +27,7 @@ export interface ByokModelDescriptor {
   name: string;
   contextWindow?: string;
   description?: string;
+  isOfflineFallback?: boolean;
 }
 
 export interface ByokProviderDefinition {
@@ -48,9 +50,8 @@ export const BYOK_PROVIDER_DEFS: Record<ByokProviderId, ByokProviderDefinition> 
     keyPrefix: "sk-ant-",
     helpUrl: "https://console.anthropic.com/settings/keys",
     defaultModels: [
-      { id: "claude-3-5-sonnet-latest", name: "Claude 3.5 Sonnet", contextWindow: "200k" },
-      { id: "claude-3-5-haiku-latest", name: "Claude 3.5 Haiku", contextWindow: "200k" },
-      { id: "claude-3-opus-latest", name: "Claude 3 Opus", contextWindow: "200k" },
+      { id: "claude-3-5-sonnet-latest", name: "Claude 3.5 Sonnet (fallback)", isOfflineFallback: true },
+      { id: "claude-3-5-haiku-latest", name: "Claude 3.5 Haiku (fallback)", isOfflineFallback: true },
     ],
   },
   openai: {
@@ -61,10 +62,8 @@ export const BYOK_PROVIDER_DEFS: Record<ByokProviderId, ByokProviderDefinition> 
     keyPrefix: "sk-",
     helpUrl: "https://platform.openai.com/api-keys",
     defaultModels: [
-      { id: "gpt-4o", name: "GPT-4o", contextWindow: "128k" },
-      { id: "gpt-4o-mini", name: "GPT-4o mini", contextWindow: "128k" },
-      { id: "o1", name: "o1 Reasoning", contextWindow: "200k" },
-      { id: "o3-mini", name: "o3-mini", contextWindow: "200k" },
+      { id: "gpt-4o", name: "GPT-4o (fallback)", isOfflineFallback: true },
+      { id: "gpt-4o-mini", name: "GPT-4o mini (fallback)", isOfflineFallback: true },
     ],
   },
   gemini: {
@@ -75,9 +74,8 @@ export const BYOK_PROVIDER_DEFS: Record<ByokProviderId, ByokProviderDefinition> 
     keyPrefix: "AIza",
     helpUrl: "https://aistudio.google.com/app/apikey",
     defaultModels: [
-      { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", contextWindow: "1M" },
-      { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", contextWindow: "2M" },
-      { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", contextWindow: "1M" },
+      { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash (fallback)", isOfflineFallback: true },
+      { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro (fallback)", isOfflineFallback: true },
     ],
   },
   mistral: {
@@ -87,9 +85,8 @@ export const BYOK_PROVIDER_DEFS: Record<ByokProviderId, ByokProviderDefinition> 
     keyPlaceholder: "sk-...",
     helpUrl: "https://console.mistral.ai/api-keys/",
     defaultModels: [
-      { id: "mistral-large-latest", name: "Mistral Large", contextWindow: "128k" },
-      { id: "codestral-latest", name: "Codestral", contextWindow: "256k" },
-      { id: "mistral-small-latest", name: "Mistral Small", contextWindow: "128k" },
+      { id: "mistral-large-latest", name: "Mistral Large (fallback)", isOfflineFallback: true },
+      { id: "codestral-latest", name: "Codestral (fallback)", isOfflineFallback: true },
     ],
   },
   openrouter: {
@@ -100,10 +97,7 @@ export const BYOK_PROVIDER_DEFS: Record<ByokProviderId, ByokProviderDefinition> 
     keyPrefix: "sk-or-",
     helpUrl: "https://openrouter.ai/keys",
     defaultModels: [
-      { id: "openrouter/auto", name: "Auto (Best for Prompt)", contextWindow: "128k" },
-      { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet (OpenRouter)", contextWindow: "200k" },
-      { id: "openai/gpt-4o", name: "GPT-4o (OpenRouter)", contextWindow: "128k" },
-      { id: "deepseek/deepseek-r1", name: "DeepSeek R1 (OpenRouter)", contextWindow: "64k" },
+      { id: "openrouter/auto", name: "Auto (fallback)", isOfflineFallback: true },
     ],
   },
   ollama: {
@@ -113,9 +107,8 @@ export const BYOK_PROVIDER_DEFS: Record<ByokProviderId, ByokProviderDefinition> 
     keyPlaceholder: "Optional (for cloud/remote endpoints)",
     supportsCustomEndpoint: true,
     defaultModels: [
-      { id: "llama3.3", name: "Llama 3.3", contextWindow: "128k" },
-      { id: "qwen2.5-coder", name: "Qwen 2.5 Coder", contextWindow: "32k" },
-      { id: "deepseek-r1", name: "DeepSeek R1", contextWindow: "64k" },
+      { id: "llama3.3", name: "Llama 3.3 (fallback)", isOfflineFallback: true },
+      { id: "qwen2.5-coder", name: "Qwen 2.5 Coder (fallback)", isOfflineFallback: true },
     ],
   },
   xai: {
@@ -126,8 +119,7 @@ export const BYOK_PROVIDER_DEFS: Record<ByokProviderId, ByokProviderDefinition> 
     keyPrefix: "xai-",
     helpUrl: "https://console.x.ai/",
     defaultModels: [
-      { id: "grok-2-latest", name: "Grok 2", contextWindow: "128k" },
-      { id: "grok-2-vision-latest", name: "Grok 2 Vision", contextWindow: "128k" },
+      { id: "grok-2-latest", name: "Grok 2 (fallback)", isOfflineFallback: true },
     ],
   },
   huggingface: {
@@ -138,8 +130,7 @@ export const BYOK_PROVIDER_DEFS: Record<ByokProviderId, ByokProviderDefinition> 
     keyPrefix: "hf_",
     helpUrl: "https://huggingface.co/settings/tokens",
     defaultModels: [
-      { id: "deepseek-ai/DeepSeek-R1", name: "DeepSeek R1", contextWindow: "64k" },
-      { id: "Qwen/Qwen2.5-Coder-32B-Instruct", name: "Qwen 2.5 Coder 32B", contextWindow: "32k" },
+      { id: "deepseek-ai/DeepSeek-R1", name: "DeepSeek R1 (fallback)", isOfflineFallback: true },
     ],
   },
   custom: {
@@ -149,123 +140,142 @@ export const BYOK_PROVIDER_DEFS: Record<ByokProviderId, ByokProviderDefinition> 
     keyPlaceholder: "API key...",
     supportsCustomEndpoint: true,
     defaultModels: [
-      { id: "custom-model-1", name: "Custom Default Model", contextWindow: "128k" },
+      { id: "custom-model", name: "Custom Model (fallback)", isOfflineFallback: true },
     ],
   },
 };
 
-export interface SavedByokConfig {
+export interface ClientByokProviderState {
   providerId: ByokProviderId;
-  encryptedKey: string;
+  displayName: string;
   maskedKey: string;
-  customName?: string;
   baseUrl?: string;
   mode?: "local" | "cloud";
-  customModels?: ByokModelDescriptor[];
+  models: ByokModelDescriptor[];
   updatedAt: number;
 }
 
+// In-memory browser session storage for Ollama-local exception
+let sessionOllamaModels: ByokModelDescriptor[] = [];
+
 /**
- * Validates a provider API key or connection.
+ * Saves a BYOK provider key to the secure server secrets store.
  */
-export async function validateProviderKey(
+export async function saveByokKeyToServer(
   providerId: ByokProviderId,
   apiKey: string,
   options: { baseUrl?: string; mode?: "local" | "cloud" } = {},
-): Promise<{ ok: boolean; models?: ByokModelDescriptor[]; error?: string }> {
-  const def = BYOK_PROVIDER_DEFS[providerId];
-  if (!def) {
-    return { ok: false, error: `Unknown provider "${providerId}".` };
-  }
-
-  // Ollama Local Rule (§10.4): Browser-side call only.
+): Promise<{ ok: boolean; record?: ClientByokProviderState; error?: string }> {
+  // Documented Ollama-local exception: Browser-direct probe & memory state
   if (providerId === "ollama" && options.mode !== "cloud") {
     const localUrl = options.baseUrl || "http://localhost:11434";
     try {
       const res = await fetch(`${localUrl}/api/tags`, { method: "GET" });
       if (!res.ok) {
-        return { ok: false, error: `Ollama daemon returned HTTP ${res.status}. Ensure Ollama is running.` };
+        return {
+          ok: false,
+          error: `Local Ollama returned HTTP ${res.status}. Ensure Ollama is running with OLLAMA_ORIGINS="*" for CORS.`,
+        };
       }
       const data = await res.json();
       const models = Array.isArray(data.models)
         ? data.models.map((m: any) => ({ id: m.name || m.model, name: m.name || m.model }))
-        : def.defaultModels;
-      return { ok: true, models: models.length > 0 ? models : def.defaultModels };
+        : BYOK_PROVIDER_DEFS.ollama.defaultModels;
+
+      sessionOllamaModels = models;
+      return {
+        ok: true,
+        record: {
+          providerId: "ollama",
+          displayName: "Ollama (Local)",
+          maskedKey: "Local Daemon",
+          baseUrl: localUrl,
+          mode: "local",
+          models,
+          updatedAt: Date.now(),
+        },
+      };
     } catch {
       return {
         ok: false,
-        error: "Cannot connect to local Ollama on http://localhost:11434. Check that Ollama is running and OLLAMA_ORIGINS is configured.",
+        error: "Cannot connect to local Ollama on http://localhost:11434. Set OLLAMA_ORIGINS=\"*\" and start ollama serve.",
       };
     }
   }
 
-  // Validate custom base URL through SSRF guard
-  const targetBaseUrl = options.baseUrl || def.defaultBaseUrl;
-  if (providerId === "custom" || options.baseUrl) {
-    const ssrf = validateUrlForFetch(targetBaseUrl);
-    if (!ssrf.valid) {
-      return { ok: false, error: `Invalid or forbidden Base URL: ${ssrf.reason}` };
-    }
-  }
-
-  if (!apiKey || apiKey.trim().length === 0) {
-    return { ok: false, error: "API Key is required." };
-  }
-
-  // Key prefix validation hint
-  if (def.keyPrefix && !apiKey.trim().startsWith(def.keyPrefix)) {
-    return {
-      ok: false,
-      error: `Key should typically start with "${def.keyPrefix}" for ${def.name}.`,
-    };
-  }
-
-  // Provider-specific probe endpoint
   try {
-    let probeUrl = `${targetBaseUrl}/models`;
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${apiKey.trim()}`,
-    };
+    const res = await fetch("/api/agent/byok", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        providerId,
+        apiKey,
+        baseUrl: options.baseUrl,
+        mode: options.mode,
+      }),
+    });
 
-    if (providerId === "anthropic") {
-      probeUrl = `${targetBaseUrl}/models`;
-      headers["x-api-key"] = apiKey.trim();
-      headers["anthropic-version"] = "2023-06-01";
-      delete headers.Authorization;
-    } else if (providerId === "gemini") {
-      probeUrl = `${targetBaseUrl}/models?key=${apiKey.trim()}`;
-      delete headers.Authorization;
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      return { ok: false, error: json.error || `HTTP ${res.status}` };
     }
 
-    const res = await fetch(probeUrl, { method: "GET", headers });
-    if (res.ok) {
-      const data = await res.json().catch(() => ({}));
-      let discoveredModels: ByokModelDescriptor[] = [];
-      if (Array.isArray(data.data)) {
-        discoveredModels = data.data.map((m: any) => ({
-          id: m.id || m.name,
-          name: m.id || m.name,
-        }));
-      } else if (Array.isArray(data.models)) {
-        discoveredModels = data.models.map((m: any) => ({
-          id: m.id || m.name,
-          name: (m.name || m.id).replace("models/", ""),
-        }));
-      }
-      return {
-        ok: true,
-        models: discoveredModels.length > 0 ? discoveredModels : def.defaultModels,
-      };
-    }
-
-    if (res.status === 401 || res.status === 403) {
-      return { ok: false, error: "Invalid API Key. Authentication rejected by provider." };
-    }
-
-    // If models endpoint is not supported by endpoint, accept if credentials pass format
-    return { ok: true, models: def.defaultModels };
+    return { ok: true, record: json.record };
   } catch (err: any) {
-    // Network or CORS issue on direct browser probe: fallback to default models if key is non-empty
-    return { ok: true, models: def.defaultModels };
+    return { ok: false, error: err.message || "Failed to reach BYOK server." };
+  }
+}
+
+/**
+ * Fetches configured BYOK providers from the server.
+ */
+export async function fetchServerByokRecords(): Promise<ClientByokProviderState[]> {
+  const records: ClientByokProviderState[] = [];
+
+  // Include session Ollama if active
+  if (sessionOllamaModels.length > 0) {
+    records.push({
+      providerId: "ollama",
+      displayName: "Ollama (Local)",
+      maskedKey: "Local Daemon",
+      baseUrl: "http://localhost:11434",
+      mode: "local",
+      models: sessionOllamaModels,
+      updatedAt: Date.now(),
+    });
+  }
+
+  try {
+    const res = await fetch("/api/agent/byok");
+    if (res.ok) {
+      const json = await res.json();
+      if (Array.isArray(json.records)) {
+        records.push(...json.records);
+      }
+    }
+  } catch {
+    // offline
+  }
+
+  return records;
+}
+
+/**
+ * Revokes a BYOK provider key on the server.
+ */
+export async function revokeByokKeyOnServer(providerId: ByokProviderId): Promise<boolean> {
+  if (providerId === "ollama") {
+    sessionOllamaModels = [];
+    return true;
+  }
+
+  try {
+    const res = await fetch(`/api/agent/byok?providerId=${encodeURIComponent(providerId)}`, {
+      method: "DELETE",
+    });
+    const json = await res.json();
+    return json.ok === true;
+  } catch {
+    return false;
   }
 }

@@ -83,7 +83,21 @@ export class McpClient {
     }
 
     if (this.config.transport === "stdio") {
+      const { evaluateCommandRisk } = await import("./command-safety");
       const { getCommandController } = await import("./command-controller");
+
+      // Stdio MCP commands must pass command safety checks inside WebContainer
+      const cmdParts = [this.config.endpointOrCommand, ...(this.config.args ?? [])];
+      const riskEvaluation = evaluateCommandRisk(cmdParts, "autonomous");
+
+      if (riskEvaluation.destructive) {
+        return {
+          ok: false,
+          tools: [],
+          error: `COMMAND_SAFETY_BLOCKED: MCP stdio command contains destructive pattern (${riskEvaluation.reason}).`,
+        };
+      }
+
       const controller = getCommandController();
       if (!controller.isMounted()) {
         return { ok: false, tools: [], error: "Workspace container is not mounted yet." };
@@ -93,7 +107,7 @@ export class McpClient {
       try {
         const procId = await controller.runCommand({
           command: this.config.endpointOrCommand,
-          args: this.config.args ?? [],
+          args: Object.freeze([...(this.config.args ?? [])]) as string[],
           owner: "agent",
         });
 

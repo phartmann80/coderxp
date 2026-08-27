@@ -57,6 +57,7 @@ async function run() {
       events.push(event);
     }
 
+    console.log("RECEIVED EVENTS:", JSON.stringify(events));
     assert.equal(events.length, 3, "Received 3 SSE events (turn-started, text-delta, turn-completed)");
     assert.equal(events[0].type, "turn-started", "First event is turn-started");
     assert.equal(events[1].type, "text-delta", "Second event is text-delta");

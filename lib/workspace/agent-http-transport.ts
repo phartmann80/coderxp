@@ -1,12 +1,17 @@
 /**
- * Client HTTP Streaming Transport for CoderXP Agent Orchestrator.
+ * HTTP SSE streaming transport implementation for CoderXP M3.8.
  *
- * Implements the provider-independent AgentTransport interface from M3.8.
- * Interacts solely with the canonical /api/agent/stream endpoint using
- * canonical Server-Sent Events (SSE).
+ * Connects the provider-independent agent orchestration layer to the
+ * `/api/agent/stream` server endpoint via Server-Sent Events (SSE).
  *
- * Contains zero provider SDKs, zero vendor-specific wire types, and
- * guarantees credentials are never exposed to logs or error objects.
+ * Invariants:
+ * - Emits canonical AgentTransportEvent objects only.
+ * - Enforces monotonic event sequencing (sequence 0, 1, 2...).
+ * - Yields exactly one terminal event on all termination paths.
+ * - Binds to Request lifecycle and cancels upstream when aborted.
+ * - Normalizes HTTP errors, network aborts, and upstream error payloads.
+ * - Never logs or exposes raw BYOK keys in event payloads.
+ * - Supports server-managed credentials (byokRequired: false) and client BYOK.
  */
 
 import type {
@@ -15,17 +20,20 @@ import type {
   AgentTransportEvent,
 } from "./agent-transport-types";
 
-export type HttpCredentialMode = "browser-byok" | "server-owned";
+export type HttpCredentialMode = "browser-byok" | "server-owned" | "auto";
 
 export interface HttpAgentTransportOptions {
   endpoint?: string;
-  /** Required when credentialMode is browser-byok. Ignored for server-owned. */
+  /** Optional BYOK key getter. */
   getApiKey?: () => string | null;
   /** Optional model id appended to the JSON body (server validates allowlist). */
   getModel?: () => string | null;
+  /** Whether client BYOK key is mandatory. Defaults to false (server manages Logicc credentials). */
+  byokRequired?: boolean;
   /**
-   * browser-byok: send x-coderxp-byok-key (Anthropic mode).
+   * browser-byok: send x-coderxp-byok-key when available.
    * server-owned: never send BYOK header (Logicc mode).
+   * auto: sends key if present, allows server credentials if null.
    */
   credentialMode?: HttpCredentialMode;
 }
@@ -34,13 +42,15 @@ export class HttpAgentTransport implements AgentTransport {
   private readonly endpoint: string;
   private readonly getApiKey: (() => string | null) | undefined;
   private readonly getModel: (() => string | null) | undefined;
+  private readonly byokRequired: boolean;
   private readonly credentialMode: HttpCredentialMode;
 
-  constructor(options: HttpAgentTransportOptions) {
+  constructor(options: HttpAgentTransportOptions = {}) {
     this.endpoint = options.endpoint ?? "/api/agent/stream";
     this.getApiKey = options.getApiKey;
     this.getModel = options.getModel;
-    this.credentialMode = options.credentialMode ?? "browser-byok";
+    this.byokRequired = options.byokRequired ?? false;
+    this.credentialMode = options.credentialMode ?? (this.byokRequired ? "browser-byok" : "auto");
   }
 
   async *send(
@@ -51,7 +61,7 @@ export class HttpAgentTransport implements AgentTransport {
     const requestId = request.requestId;
 
     let key: string | null = null;
-    if (this.credentialMode === "browser-byok") {
+    if (this.credentialMode === "browser-byok" && this.byokRequired) {
       key = this.getApiKey?.() ?? null;
       if (!key || typeof key !== "string" || key.trim().length === 0) {
         yield {
@@ -73,6 +83,8 @@ export class HttpAgentTransport implements AgentTransport {
         };
         return;
       }
+    } else if (this.credentialMode !== "server-owned") {
+      key = this.getApiKey?.() ?? null;
     }
 
     if (signal.aborted) {
@@ -90,30 +102,34 @@ export class HttpAgentTransport implements AgentTransport {
         sequence: 1,
         requestId,
         turnId,
-        reason: "Request aborted before dispatch.",
+        reason: "Request cancelled before execution.",
       };
       return;
     }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      Accept: "text/event-stream",
     };
-    if (this.credentialMode === "browser-byok" && key) {
+
+    if (this.credentialMode !== "server-owned" && key && key.trim().length > 0) {
       headers["x-coderxp-byok-key"] = key.trim();
     }
 
-    const model = this.getModel?.() ?? null;
-    const bodyPayload =
-      model && model.trim().length > 0
-        ? { ...request, model: model.trim() }
-        : request;
+    const modelOverride = this.getModel?.();
+    const payload = {
+      ...request,
+      ...(modelOverride && modelOverride.trim().length > 0
+        ? { model: modelOverride.trim() }
+        : {}),
+    };
 
     let response: Response;
     try {
       response = await fetch(this.endpoint, {
         method: "POST",
         headers,
-        body: JSON.stringify(bodyPayload),
+        body: JSON.stringify(payload),
         signal,
       });
     } catch (err: unknown) {

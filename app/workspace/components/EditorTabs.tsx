@@ -1,29 +1,83 @@
 "use client";
 
 /**
- * Editor tab bar for CoderXP M2 Workspace Alpha.
+ * Editor tab bar for CoderXP Workspace v2.
  *
- * Commit 4 scope: displays open file tabs with close buttons.
- * - Clicking a tab activates that file.
- * - Close button removes the tab and switches to the next available tab.
- * - Dirty indicator (unsaved changes) shown as a dot.
- * - Matches the obsidian/graphite workspace palette.
+ * 35px height tab bar matching coderxp-workspace-v2.html:
+ * - File-type icons
+ * - Filename
+ * - Dirty indicator dot (mod)
+ * - Close button (x)
+ * - Active tab with top accent border line and editor background
  */
 
-import { X, File as FileIcon } from "lucide-react";
+import React from "react";
 import { getEntryName } from "@/lib/workspace/path-utils";
 
 interface EditorTabsProps {
-  /** Open tab file paths. */
   openTabs: string[];
-  /** Currently active file path. */
   activeFile: string | null;
-  /** Set of file paths with unsaved changes. */
   dirtyPaths: Set<string>;
-  /** Called when a tab is clicked. */
   onSelect: (path: string) => void;
-  /** Called when a tab's close button is clicked. */
   onClose: (path: string) => void;
+}
+
+function getFileIcon(filename: string) {
+  if (filename.endsWith(".html") || filename.endsWith(".htm")) {
+    return (
+      <svg
+        className="fico"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="#e5534b"
+        strokeWidth="1.6"
+        style={{ width: 13, height: 13, flex: "none" }}
+      >
+        <path d="M4 4l1.5 15L12 21l6.5-2L20 4H4z" />
+      </svg>
+    );
+  }
+  if (filename.endsWith(".css") || filename.endsWith(".scss")) {
+    return (
+      <svg
+        className="fico"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="#3aa3ff"
+        strokeWidth="1.6"
+        style={{ width: 13, height: 13, flex: "none" }}
+      >
+        <path d="M4 4l1.5 15L12 21l6.5-2L20 4H4z" />
+      </svg>
+    );
+  }
+  if (filename.endsWith(".js") || filename.endsWith(".ts") || filename.endsWith(".tsx") || filename.endsWith(".jsx")) {
+    return (
+      <svg
+        className="fico"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="#e5b567"
+        strokeWidth="1.6"
+        style={{ width: 13, height: 13, flex: "none" }}
+      >
+        <rect x="4" y="4" width="16" height="16" rx="2" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      className="fico"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#8b8f95"
+      strokeWidth="1.6"
+      style={{ width: 13, height: 13, flex: "none" }}
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+    </svg>
+  );
 }
 
 export function EditorTabs({
@@ -36,40 +90,43 @@ export function EditorTabs({
   if (openTabs.length === 0) return null;
 
   return (
-    <div className="flex items-stretch overflow-x-auto border-b border-gray-800 bg-[#0a0b0d]">
+    <div className="tabsbar" role="tablist" aria-label="Editor tabs">
       {openTabs.map((path) => {
         const isActive = path === activeFile;
         const isDirty = dirtyPaths.has(path);
         const name = getEntryName(path);
 
         return (
-          <div
+          <button
             key={path}
-            className={`group flex items-center gap-2 px-3 py-1.5 cursor-pointer border-r border-gray-800/50 transition-colors select-none ${
-              isActive
-                ? "bg-[#0d0e10] text-gray-200"
-                : "bg-[#0a0b0d] text-gray-500 hover:bg-[#0d0e10]/50 hover:text-gray-400"
-            }`}
-            onClick={() => onSelect(path)}
+            type="button"
+            className={`etab ${isActive ? "active" : ""}`}
             role="tab"
             aria-selected={isActive}
+            onClick={() => onSelect(path)}
           >
-            <FileIcon className="w-3 h-3 flex-shrink-0 text-gray-600" />
-            <span className="text-xs font-mono truncate max-w-[120px]">{name}</span>
-            {isDirty && (
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 flex-shrink-0" />
-            )}
-            <button
-              className={`flex-shrink-0 p-0.5 rounded hover:bg-gray-700/50 transition-colors ${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+            {getFileIcon(name)}
+            <span>{name}</span>
+            {isDirty && <span className="mod" title="Unsaved changes" />}
+            <span
+              className="x"
+              role="button"
+              tabIndex={0}
+              aria-label={`Close ${name}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onClose(path);
               }}
-              aria-label={`Close ${name}`}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.stopPropagation();
+                  onClose(path);
+                }
+              }}
             >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
+              ×
+            </span>
+          </button>
         );
       })}
     </div>

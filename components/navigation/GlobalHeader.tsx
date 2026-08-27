@@ -20,6 +20,10 @@ export function GlobalHeader() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  if (pathname === "/workspace" || pathname?.startsWith("/workspace/")) {
+    return null;
+  }
+
   const mainNav = [
     { name: "Features", href: "/features", icon: Sparkles },
     { name: "Workspace", href: "/workspace", icon: Terminal },

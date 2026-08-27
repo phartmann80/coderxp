@@ -1,8 +1,16 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
 import { ShieldCheck, Activity, Github, ArrowUpRight } from "lucide-react";
 
 export function EnterpriseFooter() {
+  const pathname = usePathname();
+
+  if (pathname === "/workspace" || pathname?.startsWith("/workspace/")) {
+    return null;
+  }
   return (
     <footer className="border-t border-titanium-border bg-obsidian-deep text-gray-400 text-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">

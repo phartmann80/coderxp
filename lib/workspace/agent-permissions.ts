@@ -32,6 +32,7 @@ import {
   type AgentToolDefinition,
   type AgentToolRisk,
 } from "./agent-tools";
+import { isDestructiveCommand } from "./command-safety";
 
 // ---------------------------------------------------------------------------
 // Modes
@@ -215,24 +216,15 @@ const REDACTED_ARG_KEYS = new Set([
 ]);
 const SUMMARY_VALUE_MAX = 80;
 
+import { redactSecrets } from "./secret-redaction";
+
 /**
  * Sanitizes arbitrary string content by redacting tokens, keys, embedded URL
  * credentials, passwords, and authorization headers.
  */
 export function sanitizeString(str: string): string {
   if (!str || typeof str !== "string") return "";
-  let sanitized = str;
-  // Redact credentials in URLs: http(s)://user:pass@host -> http(s)://[REDACTED]@host
-  sanitized = sanitized.replace(/(https?:\/\/)[^:\s]+:[^@\s]+@/gi, "$1[REDACTED]@");
-  // Redact URL query parameters with sensitive keys
-  sanitized = sanitized.replace(/([?&](?:token|password|passwd|secret|api_?key|access_?token|auth|cred|bearer)=)[^&\s]+/gi, "$1[REDACTED]");
-  // Redact Authorization headers and Bearer tokens
-  sanitized = sanitized.replace(/(Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "$1[REDACTED]");
-  // Redact flag and assignment parameters like --token=secret, token=secret, --password secret, --api-key=123
-  sanitized = sanitized.replace(/((?:--)?(?:token|password|passwd|secret|api_?key|auth|credentials)=)[^\s'";]+/gi, "$1[REDACTED]");
-  // Redact common secret key prefixes (e.g. ghp_..., sk_live_..., sk_test_...)
-  sanitized = sanitized.replace(/(?:ghp|sk_live|sk_test|xox[baprs])-[A-Za-z0-9_]+/gi, "[REDACTED_TOKEN]");
-  return sanitized;
+  return redactSecrets(str);
 }
 
 /**
@@ -314,6 +306,20 @@ export interface PermissionControllerOptions {
   onChange?: () => void;
 }
 
+function getEffectiveRisk(tool: AgentToolDefinition, args: unknown): AgentToolRisk {
+  if (tool.name === "run_command" && typeof args === "object" && args !== null) {
+    const record = args as Record<string, unknown>;
+    const cmd = typeof record.command === "string" ? record.command : "";
+    const argv = Array.isArray(record.args)
+      ? [cmd, ...record.args.map(String)]
+      : cmd.split(/\s+/).filter(Boolean);
+    if (isDestructiveCommand(argv)) {
+      return "destructive";
+    }
+  }
+  return tool.risk;
+}
+
 export class AgentPermissionController {
   private mode: AgentPermissionMode;
   private readonly now: () => number;
@@ -388,7 +394,8 @@ export class AgentPermissionController {
       return { kind: "approval-required", tool, approvalId: existing.approvalId };
     }
 
-    if (policyFor(tool.risk, this.mode) === "auto") {
+    const effectiveRisk = getEffectiveRisk(tool, call.args);
+    if (policyFor(effectiveRisk, this.mode) === "auto") {
       return { kind: "allowed", tool };
     }
 
@@ -432,7 +439,8 @@ export class AgentPermissionController {
       }
     }
 
-    if (policyFor(tool.risk, this.mode) === "auto") {
+    const effectiveRisk = getEffectiveRisk(tool, call.args);
+    if (policyFor(effectiveRisk, this.mode) === "auto") {
       return { kind: "allowed", tool };
     }
 
@@ -442,7 +450,7 @@ export class AgentPermissionController {
       projectId: call.projectId,
       generation: call.generation,
       toolName: call.name,
-      risk: tool.risk,
+      risk: effectiveRisk,
       argsFingerprint: fingerprintArgs(call.args),
       args: call.args,
       summary: summarizeToolCall(call.name, call.args),

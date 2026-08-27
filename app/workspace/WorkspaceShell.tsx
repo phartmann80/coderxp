@@ -1,13 +1,9 @@
 "use client";
 
 /**
- * Workspace shell for CoderXP M2 Workspace Alpha.
+ * Workspace shell for CoderXP M2/M3 Workspace v2.
  *
- * Correction (fix(workspace): preserve retry and open ownership):
- * - Passes retrying to ProjectLauncher so all launcher controls are
- *   disabled while a retry is settling.
- * - Fatal error view (view === "error") shows Retry only, no Dismiss.
- * - Launcher and project views show ErrorBanner with retrying state.
+ * Provides full 100vh viewport without marketing header/footer offsets.
  */
 
 import { useWorkspaceState } from "./hooks/useWorkspaceState";
@@ -46,15 +42,15 @@ export default function WorkspaceShell() {
     renaming || deleting || retrying || openingProjectId !== null;
 
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] bg-[#0d0e10] text-gray-200">
+    <div className="h-screen w-screen overflow-hidden bg-[#151617] text-gray-200">
       {view === "loading" && (
-        <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="flex items-center justify-center h-full">
           <p className="text-sm text-gray-500">Loading workspace...</p>
         </div>
       )}
 
       {view === "error" && error && (
-        <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="flex items-center justify-center h-full">
           <ErrorBanner
             error={error}
             onRetry={retry}
@@ -64,7 +60,7 @@ export default function WorkspaceShell() {
       )}
 
       {view === "launcher" && (
-        <div>
+        <div className="h-full overflow-y-auto">
           {error && retryAction && (
             <ErrorBanner
               error={error}
@@ -86,7 +82,7 @@ export default function WorkspaceShell() {
       )}
 
       {view === "project" && activeProject && (
-        <div className="flex flex-col h-[calc(100vh-3.5rem)]">
+        <div className="flex flex-col h-full overflow-hidden">
           {error && retryAction && (
             <ErrorBanner
               error={error}

@@ -733,8 +733,16 @@ export async function runCommand(
     );
   }
 
-  const args = (params.args ?? []).map((arg) => String(arg));
+  let args = (params.args ?? []).map((arg) => String(arg));
   const cwd = params.cwd ?? WORKSPACE_PROJECT_ROOT;
+
+  // Review Note §1: Agent-initiated npm install must run inside WebContainer with --ignore-scripts by default
+  const baseCmd = params.command.toLowerCase();
+  if (baseCmd === "npm" && (args[0] === "install" || args[0] === "i" || args[0] === "ci")) {
+    if (!args.includes("--ignore-scripts")) {
+      args.push("--ignore-scripts");
+    }
+  }
 
   // Any command may read project source, and which ones do is not knowable
   // from the command line, so every command flushes. The alternative is a

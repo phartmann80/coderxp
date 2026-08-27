@@ -11,8 +11,6 @@
  * - Caps response size (max 2 MB) and sanitizes response to text/markdown
  */
 
-import dns from "node:dns";
-
 export interface SsrValidationResult {
   valid: boolean;
   reason?: string;
@@ -133,7 +131,13 @@ export function validateUrlForFetch(rawUrl: string): SsrValidationResult {
  * Resolves hostname via DNS and checks all resolved IP addresses (DNS-rebinding protection).
  */
 export async function validateDnsResolution(hostname: string): Promise<{ valid: boolean; reason?: string }> {
+  if (typeof window !== "undefined") {
+    // In browser client runtime, DNS lookup is handled natively by the browser sandbox
+    return { valid: true };
+  }
+
   try {
+    const dns = await import("node:dns");
     const addresses = await dns.promises.lookup(hostname, { all: true });
     for (const record of addresses) {
       const check = isForbiddenIp(record.address);

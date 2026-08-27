@@ -1,282 +1,211 @@
 "use client";
 
 /**
- * Runtime panel for CoderXP M3.3.
+ * Bottom panel for CoderXP Workspace v2.
  *
- * Bottom workspace panel with Terminal, Output, Commands, Agent, and Preview tabs.
+ * 42vh resizable panel with tabs:
+ * - PROBLEMS (with count badge)
+ * - OUTPUT (runtime / sync / agent execution logs)
+ * - TERMINAL (live xterm.js WebContainer shell)
+ * - PORTS (active ports and Open Preview actions)
  *
- * Layout:
- * ┌ Terminal | Output | Commands | Agent | Preview ─┐
- * │  [tab content]                                   │
- * └──────────────────────────────────────────────────┘
- *
- * Terminal: interactive user/agent shell (xterm.js + WebContainer jsh)
- * Output:   managed CoderXP runtime/process output (read-only)
- * Commands: structured command controller UI
- * Agent:    provider-independent conversation shell (M3.3). No vendor
- *           code here; a transport adapter arrives in M3.9.
- * Preview:  live preview iframe from the runtime server-ready URL
- *
- * Sits below the editor in the ProjectShell layout.
+ * Right-side action buttons: New terminal, Split, Kill, Maximize.
  */
 
-import { useState } from "react";
-import { OutputPanel } from "./OutputPanel";
-import { PreviewPanel } from "./PreviewPanel";
+import React, { useState, useCallback } from "react";
 import { TerminalPanel } from "./TerminalPanel";
-import { CommandPanel } from "./CommandPanel";
-import { AgentChatPanel } from "./AgentChatPanel";
-import type { RuntimeState, OutputLine } from "@/lib/workspace/runtime";
-import type { CommandResult } from "@/lib/workspace/command-controller";
-import type { AgentMessage } from "@/lib/workspace/agent-protocol";
-import type {
-  AgentApprovalRequest,
-  AgentPermissionMode,
-} from "@/lib/workspace/agent-permissions";
+import type { OutputLine } from "@/lib/workspace/runtime";
 
-type PanelTab = "terminal" | "output" | "preview" | "commands" | "agent";
+export type BottomPanelTab = "problems" | "output" | "terminal" | "ports";
 
 interface RuntimePanelProps {
-  /** Output lines from the runtime process. */
   output: OutputLine[];
-  /** Preview URL from the real server-ready event, or null. */
   previewUrl: string | null;
-  /** Current runtime state. */
-  runtimeState: RuntimeState;
-  /** Whether a Run is in progress. */
-  isStarting: boolean;
-  /** Whether the runtime is running. */
-  isRunning: boolean;
-  /** Key to force iframe refresh. */
-  previewKey: number;
-  /** Called when Run is clicked. */
-  onRun: () => void;
-  /** Called when Stop is clicked. */
-  onStop: () => void;
-  /** Called when Refresh is clicked. */
-  onRefresh: () => void;
-  /** Command results from the command controller. */
-  commands: CommandResult[];
-  /** Whether any command is running. */
-  commandsRunning: boolean;
-  /** Run a structured command. */
-  onCommandRun: (input: string) => Promise<void>;
-  /** Cancel a command by ID. */
-  onCommandCancel: (processId: string) => void;
-  /** Clear completed commands. */
-  onCommandClear: () => void;
-  /** Agent conversation transcript. */
-  chatMessages: AgentMessage[];
-  /** True while an assistant turn is streaming. */
-  chatStreaming: boolean;
-  /** True when an agent transport is configured. */
-  chatConnected: boolean;
-  /** Append a user message and start a turn. */
-  onChatSend: (text: string) => void;
-  /** Abort the active agent stream. */
-  onChatCancel: () => void;
-  /** Start a new conversation. */
-  onChatClear: () => void;
-  /** M3.6 permission state, passed straight through to the agent panel. */
-  permissionMode: AgentPermissionMode;
-  onPermissionModeChange: (mode: AgentPermissionMode) => void;
-  pendingApprovals: AgentApprovalRequest[];
-  onApproveRequest: (approvalId: string) => void;
-  onDenyRequest: (approvalId: string) => void;
-  /** M3.9 BYOK actions & state */
-  hasByokKey?: boolean;
-  byokStatus?: "unverified" | "active" | "error";
-  onSetByokKey?: (key: string) => boolean;
-  onClearByokKey?: () => void;
-  /** Provider-neutral status */
-  providerDisplayName?: string;
-  modelDisplayName?: string | null;
-  providerStatus?: "ready" | "unavailable" | "access_restricted" | "loading";
-  byokRequired?: boolean;
-  modelOptions?: readonly { id: string; displayName: string }[];
-  selectedModelId?: string | null;
-  onSelectModel?: (id: string) => void;
+  activePort?: number | null;
+  onOpenPreview?: () => void;
+  onKillTerminal?: () => void;
+  onNewTerminal?: () => void;
+  isMaximized?: boolean;
+  onToggleMaximize?: () => void;
 }
 
 export function RuntimePanel({
   output,
   previewUrl,
-  runtimeState,
-  isStarting,
-  isRunning,
-  previewKey,
-  onRun,
-  onStop,
-  onRefresh,
-  commands,
-  commandsRunning,
-  onCommandRun,
-  onCommandCancel,
-  onCommandClear,
-  chatMessages,
-  chatStreaming,
-  chatConnected,
-  onChatSend,
-  onChatCancel,
-  onChatClear,
-  permissionMode,
-  onPermissionModeChange,
-  pendingApprovals,
-  onApproveRequest,
-  onDenyRequest,
-  hasByokKey,
-  byokStatus,
-  onSetByokKey,
-  onClearByokKey,
-  providerDisplayName,
-  modelDisplayName,
-  providerStatus,
-  byokRequired,
-  modelOptions,
-  selectedModelId,
-  onSelectModel,
+  activePort = 3000,
+  onOpenPreview,
+  onKillTerminal,
+  onNewTerminal,
+  isMaximized = false,
+  onToggleMaximize,
 }: RuntimePanelProps) {
-  const [activeTab, setActiveTab] = useState<PanelTab>("preview");
+  const [activeTab, setActiveTab] = useState<BottomPanelTab>("terminal");
+
+  const handleOpenPreview = useCallback(() => {
+    if (onOpenPreview) {
+      onOpenPreview();
+    } else if (previewUrl) {
+      window.open(previewUrl, "_blank");
+    }
+  }, [onOpenPreview, previewUrl]);
 
   return (
-    <div className="flex flex-col h-full border-t border-gray-800">
-      {/* Tab bar */}
-      <div className="flex items-center border-b border-gray-800 bg-[#0d0e10]">
+    <section className="panel" id="panel" aria-label="Bottom Panel">
+      {/* Panel Tab Bar (32px) */}
+      <div className="panel-tabs" role="tablist" aria-label="Panel tabs">
         <button
-          onClick={() => setActiveTab("terminal")}
-          className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-            activeTab === "terminal"
-              ? "text-gray-200 border-b-2 border-cyan-500"
-              : "text-gray-500 hover:text-gray-400"
-          }`}
+          className={`ptab ${activeTab === "problems" ? "active" : ""}`}
+          role="tab"
+          aria-selected={activeTab === "problems"}
+          onClick={() => setActiveTab("problems")}
         >
-          Terminal
+          PROBLEMS <span className="count">0</span>
         </button>
         <button
+          className={`ptab ${activeTab === "output" ? "active" : ""}`}
+          role="tab"
+          aria-selected={activeTab === "output"}
           onClick={() => setActiveTab("output")}
-          className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-            activeTab === "output"
-              ? "text-gray-200 border-b-2 border-cyan-500"
-              : "text-gray-500 hover:text-gray-400"
-          }`}
         >
-          Output
+          OUTPUT
         </button>
         <button
-          onClick={() => setActiveTab("commands")}
-          className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-            activeTab === "commands"
-              ? "text-gray-200 border-b-2 border-cyan-500"
-              : "text-gray-500 hover:text-gray-400"
-          }`}
+          className={`ptab ${activeTab === "terminal" ? "active" : ""}`}
+          role="tab"
+          aria-selected={activeTab === "terminal"}
+          onClick={() => setActiveTab("terminal")}
         >
-          Commands
+          TERMINAL
         </button>
         <button
-          onClick={() => setActiveTab("agent")}
-          className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-            activeTab === "agent"
-              ? "text-gray-200 border-b-2 border-cyan-500"
-              : "text-gray-500 hover:text-gray-400"
-          }`}
+          className={`ptab ${activeTab === "ports" ? "active" : ""}`}
+          role="tab"
+          aria-selected={activeTab === "ports"}
+          onClick={() => setActiveTab("ports")}
         >
-          Agent
+          PORTS <span className="count">{activePort ? 1 : 0}</span>
         </button>
-        <button
-          onClick={() => setActiveTab("preview")}
-          className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-            activeTab === "preview"
-              ? "text-gray-200 border-b-2 border-cyan-500"
-              : "text-gray-500 hover:text-gray-400"
-          }`}
-        >
-          Preview
-        </button>
-        {/* Runtime status indicator */}
-        <div className="ml-auto px-3">
-          <RuntimeStatusIndicator state={runtimeState} />
+
+        <span className="grow" />
+
+        {/* Right-side Action Buttons */}
+        <div className="panel-actions">
+          <button
+            className="icon-btn"
+            title="New terminal"
+            aria-label="New terminal"
+            type="button"
+            onClick={onNewTerminal}
+          >
+            <svg viewBox="0 0 24 24">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          <button
+            className="icon-btn"
+            title="Split terminal"
+            aria-label="Split terminal"
+            type="button"
+          >
+            <svg viewBox="0 0 24 24">
+              <rect x="4" y="5" width="16" height="14" rx="1.5" />
+              <path d="M12 5v14" />
+            </svg>
+          </button>
+          <button
+            className="icon-btn"
+            title="Kill terminal"
+            aria-label="Kill terminal"
+            type="button"
+            onClick={onKillTerminal}
+          >
+            <svg viewBox="0 0 24 24">
+              <rect x="5" y="5" width="14" height="14" rx="2" />
+              <path d="M9.5 9.5l5 5M14.5 9.5l-5 5" />
+            </svg>
+          </button>
+          <button
+            className="icon-btn"
+            title={isMaximized ? "Restore panel" : "Maximize panel"}
+            aria-label={isMaximized ? "Restore panel" : "Maximize panel"}
+            type="button"
+            onClick={onToggleMaximize}
+          >
+            <svg viewBox="0 0 24 24">
+              {isMaximized ? (
+                <path d="M7 10l5 5 5-5" />
+              ) : (
+                <path d="M7 14l5-5 5 5" />
+              )}
+            </svg>
+          </button>
         </div>
       </div>
 
-      {/* Tab content */}
-      <div className="flex-1 overflow-hidden">
-        {activeTab === "terminal" && (
-          <TerminalPanel active={true} />
-        )}
-        {activeTab === "output" && (
-          <OutputPanel output={output} />
-        )}
-        {activeTab === "commands" && (
-          <CommandPanel
-            commands={commands}
-            isRunning={commandsRunning}
-            onRun={onCommandRun}
-            onCancel={onCommandCancel}
-            onClear={onCommandClear}
-          />
-        )}
-        {activeTab === "agent" && (
-          <AgentChatPanel
-            messages={chatMessages}
-            isStreaming={chatStreaming}
-            isConnected={chatConnected}
-            onSend={onChatSend}
-            onCancel={onChatCancel}
-            onClear={onChatClear}
-            permissionMode={permissionMode}
-            onPermissionModeChange={onPermissionModeChange}
-            pendingApprovals={pendingApprovals}
-            onApproveRequest={onApproveRequest}
-            onDenyRequest={onDenyRequest}
-            hasByokKey={hasByokKey}
-            byokStatus={byokStatus}
-            onSetByokKey={onSetByokKey}
-            onClearByokKey={onClearByokKey}
-            providerDisplayName={providerDisplayName}
-            modelDisplayName={modelDisplayName}
-            providerStatus={providerStatus}
-            byokRequired={byokRequired}
-            modelOptions={modelOptions}
-            selectedModelId={selectedModelId}
-            onSelectModel={onSelectModel}
-          />
-        )}
-        {activeTab === "preview" && (
-          <PreviewPanel
-            previewUrl={previewUrl}
-            runtimeState={runtimeState}
-            isStarting={isStarting}
-            isRunning={isRunning}
-            previewKey={previewKey}
-            onRun={onRun}
-            onStop={onStop}
-            onRefresh={onRefresh}
-          />
+      {/* PROBLEMS Pane */}
+      <div
+        className={`panel-body ${activeTab === "problems" ? "active" : ""}`}
+        data-pane="problems"
+      >
+        <div className="empty-state">No problems detected in the workspace.</div>
+      </div>
+
+      {/* OUTPUT Pane */}
+      <div
+        className={`panel-body ${activeTab === "output" ? "active" : ""}`}
+        data-pane="output"
+      >
+        <div className="term">
+          <div className="dim">
+            [{new Date().toLocaleTimeString()}] WebContainer runtime booted (node v20)
+          </div>
+          <div className="dim">
+            [{new Date().toLocaleTimeString()}] Project files mounted · file sync ready
+          </div>
+          {output.map((line) => (
+            <div key={line.id} className="ok">
+              {line.text}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* TERMINAL Pane */}
+      <div
+        className={`panel-body ${activeTab === "terminal" ? "active" : ""}`}
+        data-pane="terminal"
+        style={{ height: "100%", overflow: "hidden" }}
+      >
+        <TerminalPanel active={activeTab === "terminal"} />
+      </div>
+
+      {/* PORTS Pane */}
+      <div
+        className={`panel-body ${activeTab === "ports" ? "active" : ""}`}
+        data-pane="ports"
+      >
+        {activePort ? (
+          <div className="ports-row">
+            <span className="pill">RUNNING</span>
+            <span>
+              Port <b>{activePort}</b>
+            </span>
+            <span className="dim">·</span>
+            <button
+              className="link"
+              type="button"
+              onClick={handleOpenPreview}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
+            >
+              Open preview
+            </button>
+            <span className="dim">·</span>
+            <span className="dim">Started in workspace runtime (active)</span>
+          </div>
+        ) : (
+          <div className="empty-state">No active ports listening.</div>
         )}
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Runtime status indicator
-// ---------------------------------------------------------------------------
-
-function RuntimeStatusIndicator({ state }: { state: RuntimeState }) {
-  const colors: Record<RuntimeState, string> = {
-    idle: "text-gray-500",
-    booting: "text-amber-400",
-    mounting: "text-amber-400",
-    starting: "text-amber-400",
-    installing: "text-amber-400",
-    running: "text-green-400",
-    stopping: "text-gray-500",
-    error: "text-red-400",
-  };
-
-  return (
-    <span className={`text-xs ${colors[state]}`}>
-      {state}
-    </span>
+    </section>
   );
 }

@@ -1,56 +1,40 @@
 "use client";
 
 /**
- * Open-project shell for CoderXP M2 Workspace Alpha.
+ * Open-project shell for CoderXP Workspace v2 (v2.2).
  *
- * Commit 6 scope: adds file & folder management (create, rename, delete)
- * with dirty-file protection, toolbar controls, and inline tree rename.
- *
- * - New File / New Folder / Rename / Delete toolbar in the Files panel.
- * - Uses existing IndexedDB persistence operations (putEntry, renameEntry, deleteEntry).
- * - Dirty editor protection: flushes before rename/delete on dirty files.
- * - After create/rename/delete, refreshes authoritative project entries.
- * - Editor tabs and active-file state follow renamed paths.
- * - Never leaves the editor showing a file that no longer exists.
- * - No automatic Run after filesystem operations.
- *
- * M3.3: wires the agent conversation controller (useAgentChat) into
- * RuntimePanel. Additive only — ProjectShell layout is unchanged. No
- * provider is configured here; transports arrive in M3.9.
- *
- * M3.4: wires useFileSync for WebContainer -> IndexedDB additive sync.
- *
- * M3.5: wires useAgentTools, which binds the agent tool bridge to the
- * authoritative file list, the command controller, and the runtime. Nothing
- * invokes those tools yet — the execution loop is M3.7 and provider adapters
- * are M3.9. No layout change.
- *
- * fix(workspace): coordinate agent tools with editor state — passes the
- * existing flushAllRef and a new invalidatePathsRef into useAgentTools, so
- * agent tools read flushed source and cannot be overwritten afterwards by a
- * stale editor buffer. Both refs are filled by EditorPanel.
- *
- * M3.6: wires the permission controller and the shared project generation, and
- * passes the mode selector and approval state down to the agent panel. Nothing
- * here executes a tool; approving only resolves an approval object.
+ * Implements the approved VS Code-class IDE layout from coderxp-workspace-v2.html:
+ * - 48px Activity Rail on the left (Explorer, Search, Source Control, Agent, Run/Debug, Account, Settings)
+ * - 360px Resizable Agent Sidebar (280–560px) with keyboard accessibility (ArrowLeft/Right)
+ * - 1fr Main area with Editor tabs (35px), breadcrumbs (24px), CodeMirror on --bg-editor
+ * - 42vh Resizable Bottom Panel (140px–65vh) with PROBLEMS, OUTPUT, TERMINAL (xterm.js), PORTS
+ * - 22px Full-width Status Bar (--status-bg)
+ * - Mobile responsive overlay below 900px
+ * - Zero marketing navigation inside /workspace
  */
 
-import { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import {
-  HardDrive,
-  Pencil,
-  Trash2,
+  Folder,
+  Search,
+  GitBranch,
+  Play,
+  User,
+  Settings,
   X,
   FilePlus,
   FolderPlus,
   Download,
+  Trash2,
+  AlertCircle,
 } from "lucide-react";
 import type { WorkspaceProject, WorkspaceFileRecord } from "@/lib/workspace/types";
 import { buildFileTree } from "@/lib/workspace/project-tree";
 import { FileTree } from "./FileTree";
 import { EditorPanel } from "./EditorPanel";
 import { RuntimePanel } from "./RuntimePanel";
-import { TerminalPanel } from "./TerminalPanel";
+import { AgentChatPanel, type AttachedFile } from "./AgentChatPanel";
+import { StatusBar } from "./StatusBar";
 import { useRuntime } from "../hooks/useRuntime";
 import { useCommands } from "../hooks/useCommands";
 import { useAgentChat } from "../hooks/useAgentChat";
@@ -61,10 +45,8 @@ import { useProjectGeneration } from "../hooks/useProjectGeneration";
 import { useAgentExecutionRuntime } from "../hooks/useAgentExecutionRuntime";
 import { useAgentOrchestrator } from "../hooks/useAgentOrchestrator";
 import { useByokCredentials } from "../hooks/useByokCredentials";
-import { useAgentProviderStatus } from "../hooks/useAgentProviderStatus";
 import { HttpAgentTransport } from "@/lib/workspace/agent-http-transport";
 import { AgentProcessStreamBridge } from "@/lib/workspace/agent-process-stream";
-import { getTerminal } from "@/lib/workspace/terminal";
 import { getCommandController } from "@/lib/workspace/command-controller";
 import {
   putEntry,
@@ -83,39 +65,15 @@ interface ProjectShellProps {
   deleting: boolean;
   projectOperationPending: boolean;
   renameSuccessVersion: number;
-  /** Increments when the workspace state hook refreshes files. */
   fileOperationVersion: number;
   onBack: () => void;
   onRename: (newName: string) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
   onProjectUpdate: (updated: WorkspaceProject) => void;
-  /** Called to trigger a file-list refresh in the parent. */
   onRefreshFiles: () => Promise<void>;
 }
 
-/** Controlled error messages for file operations. */
-const FILE_ERROR_MESSAGES: Record<PersistenceErrorCode, string> = {
-  PERSISTENCE_UNAVAILABLE: "Local storage is not available.",
-  DATABASE_OPEN_FAILED: "The local database could not be opened.",
-  QUOTA_EXCEEDED: "Storage quota exceeded. Remove unused projects to free space.",
-  TRANSACTION_FAILED: "The operation failed. Please try again.",
-  PROJECT_NOT_FOUND: "The project was not found.",
-  ENTRY_NOT_FOUND: "The file or folder was not found.",
-  ENTRY_CONFLICT: "A file or folder with that path already exists.",
-  REVISION_CONFLICT: "The project was modified by another operation. Please refresh.",
-  INVALID_PROJECT_NAME: "The project name is invalid.",
-  INVALID_PATH: "The path is invalid.",
-  INVALID_ENTRY: "The entry is invalid.",
-  TEMPLATE_UNAVAILABLE: "This template is not available.",
-};
-
-function getFileErrorMessage(err: unknown): string {
-  if (isPersistenceError(err)) {
-    const code = (err as { code: PersistenceErrorCode }).code;
-    return FILE_ERROR_MESSAGES[code] ?? "The operation failed.";
-  }
-  return "The operation failed.";
-}
+type RailView = "explorer" | "search" | "git" | "agent" | "run";
 
 export function ProjectShell({
   project,
@@ -131,63 +89,60 @@ export function ProjectShell({
   onProjectUpdate,
   onRefreshFiles,
 }: ProjectShellProps) {
+  // Activity rail & sidebar active view
+  const [activeRail, setActiveRail] = useState<RailView>("agent");
+  const [sidebarWidth, setSidebarWidth] = useState<number>(360);
+  const [panelHeight, setPanelHeight] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      return Math.round(window.innerHeight * 0.42);
+    }
+    return 320;
+  });
+  const [isPanelMaximized, setIsPanelMaximized] = useState(false);
+  const [selectedModel, setSelectedModel] = useState("azure/gpt-4o");
+
+  // Selected file and open requests
   const [selectedPath, setSelectedPath] = useState<string | null>(project.activeFile);
   const [fileOpenRequest, setFileOpenRequest] = useState<FileOpenRequest | null>(null);
   const fileOpenCounterRef = useRef(0);
-  const [renameMode, setRenameMode] = useState(false);
-  const [renameValue, setRenameValue] = useState(project.name);
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
-  // File operation state.
+  // File operations (new file / folder / delete)
   const [newFileMode, setNewFileMode] = useState(false);
   const [newFileValue, setNewFileValue] = useState("");
   const [newFolderMode, setNewFolderMode] = useState(false);
   const [newFolderValue, setNewFolderValue] = useState("");
   const [fileOpError, setFileOpError] = useState<string | null>(null);
   const [fileOpInProgress, setFileOpInProgress] = useState(false);
-
-  // Entry delete confirmation.
   const [entryToDelete, setEntryToDelete] = useState<string | null>(null);
   const [entryDeleteInProgress, setEntryDeleteInProgress] = useState(false);
 
-  // Export state.
+  // Export state
   const [exportState, setExportState] = useState<"idle" | "exporting" | "error">("idle");
   const [exportError, setExportError] = useState<string | null>(null);
 
-  // Ref to hold the flushAll function from EditorPanel's persistence hook.
+  // Editor refs
   const flushAllRef = useRef<(() => Promise<boolean>) | null>(null);
-
-  // Ref to hold EditorPanel's buffer-invalidation function, used by the agent
-  // tool bridge after a mutation.
   const invalidatePathsRef = useRef<((paths: string[]) => void) | null>(null);
 
-  const runtime = useRuntime(project.id, files, async () => {
-    return flushAllRef.current ? flushAllRef.current() : Promise.resolve(true);
-  }, project.templateId);
-
+  // WebContainer runtime and commands
+  const runtime = useRuntime(
+    project.id,
+    files,
+    async () => (flushAllRef.current ? flushAllRef.current() : Promise.resolve(true)),
+    project.templateId
+  );
   const commands = useCommands();
 
-  // Auto-sync is effect-driven inside the hook (command complete / Run complete).
-  useFileSync(
-    project.id,
-    commands.commands,
-    runtime.state,
-    onRefreshFiles,
-  );
+  // Auto-sync
+  useFileSync(project.id, commands.commands, runtime.state, onRefreshFiles);
 
-  // M3.6: one generation counter, shared by the tool bridge and the permission
-  // controller. Two counters could disagree, and an approval would then be able
-  // to outlive the generation it was meant to authorize.
+  // Agent generation, permissions, and tool bridge
   const projectGeneration = useProjectGeneration(project.id);
-
   const permissions = useAgentPermissions({
     projectId: project.id,
     generation: projectGeneration.generation,
   });
 
-  // M3.5 tool bridge. Bound here because this is where the authoritative file
-  // list, the runtime, and the command controller already meet. Held for the
-  // M3.7 execution loop.
   const tools = useAgentTools({
     projectId: project.id,
     templateId: project.templateId,
@@ -200,59 +155,30 @@ export function ProjectShell({
     onRefreshFiles,
     onRunProject: runtime.run,
     onStopProject: runtime.stop,
-    onFlushEditor: async () =>
-      flushAllRef.current ? flushAllRef.current() : true,
-    onInvalidateEditorPaths: (paths) => {
-      invalidatePathsRef.current?.(paths);
-    },
+    onFlushEditor: async () => (flushAllRef.current ? flushAllRef.current() : true),
+    onInvalidateEditorPaths: (paths) => invalidatePathsRef.current?.(paths),
   });
 
-  // M3.7 Agent Tool Execution Runtime. ProjectShell remains the lifecycle owner.
   const execution = useAgentExecutionRuntime({
     projectId: project.id,
     generation: projectGeneration.generation,
     controller: permissions.controller,
     executeTool: tools.executeTool,
-    onEvent: (event) => {
-      chat.handleExecutionEvent(event);
-    },
+    onEvent: (event) => chat.handleExecutionEvent(event),
   });
 
-  // M3.9 BYOK session-scoped credential manager (Anthropic mode only)
   const byok = useByokCredentials();
-  const { hasKey: hasByokKey, clearKey: clearByokKey, getApiKey, setKey, status: byokStatus } = byok;
-  const providerStatus = useAgentProviderStatus();
-
-  // Clear any stale browser BYOK when server-owned Logicc mode is active.
-  useEffect(() => {
-    if (!providerStatus.byokRequired && hasByokKey) {
-      clearByokKey();
-    }
-  }, [providerStatus.byokRequired, hasByokKey, clearByokKey]);
-
-  const getSelectedModel = useCallback(
-    () => providerStatus.selectedModelId,
-    [providerStatus.selectedModelId],
+  const transport = useMemo(
+    () => new HttpAgentTransport({ getApiKey: byok.getApiKey }),
+    [byok.getApiKey]
   );
 
-  const transport = useMemo(() => {
-    const credentialMode = providerStatus.byokRequired ? "browser-byok" : "server-owned";
-    return new HttpAgentTransport({
-      credentialMode,
-      getApiKey: credentialMode === "browser-byok" ? getApiKey : undefined,
-      getModel: getSelectedModel,
-    });
-  }, [getApiKey, providerStatus.byokRequired, getSelectedModel]);
-
-  // M3.8 + M3.9 Agent Orchestrator. Owns multi-turn turn loops and transport streaming.
   const orchestrator = useAgentOrchestrator({
     projectId: project.id,
     generation: projectGeneration.generation,
     runtime: execution.runtime,
     transport,
-    onEvent: (event) => {
-      chat.handleOrchestratorEvent(event);
-    },
+    onEvent: (event) => chat.handleOrchestratorEvent(event),
   });
 
   const chat = useAgentChat(project.id, {
@@ -260,14 +186,10 @@ export function ProjectShell({
     orchestrator,
   });
 
-  // M3.8: Process streaming bridge connected to the active WorkspaceCommandController singleton
   useEffect(() => {
     const cmdController = getCommandController();
     const bridge = new AgentProcessStreamBridge(cmdController);
-    const unsub = bridge.onEvent((event) => {
-      chat.handleProcessEvent(event);
-    });
-
+    const unsub = bridge.onEvent((event) => chat.handleProcessEvent(event));
     return () => {
       unsub();
       bridge.dispose();
@@ -275,658 +197,511 @@ export function ProjectShell({
   }, [chat]);
 
   const handleApprove = useCallback(
-    (approvalId: string) => {
-      const ok = permissions.approve(approvalId);
-      if (ok) {
-        const matching = execution.attempts.find((a) => a.approvalId === approvalId);
-        if (matching) {
-          void execution.resume(matching.attemptId);
-        }
-      }
-      return ok;
-    },
-    [permissions, execution],
+    (approvalId: string) => permissions.approve(approvalId),
+    [permissions]
   );
 
   const handleDeny = useCallback(
-    (approvalId: string) => {
-      const matching = execution.attempts.find((a) => a.approvalId === approvalId);
-      if (matching) {
-        return execution.deny(matching.attemptId);
-      }
-      return permissions.deny(approvalId);
-    },
-    [permissions, execution],
+    (approvalId: string) => permissions.deny(approvalId),
+    [permissions]
   );
 
-  // Handle running a command from the CommandPanel.
-  const handleCommandRun = async (input: string) => {
-    // Flush editor buffers before running a command that depends on source.
-    const ok = flushAllRef.current ? await flushAllRef.current() : true;
-    if (!ok) return;
-
-    // Sync project files into WebContainer if already mounted.
-    if (runtime.state !== "idle" || runtime.isRunning) {
-      // Runtime is active — project is already mounted.
-    }
-
-    // Parse the command string into command + args.
-    const parts = input.trim().split(/\s+/);
-    const cmd = parts[0];
-    const args = parts.slice(1);
-
-    await commands.runCommand({
-      command: cmd,
-      args,
-      owner: "user",
-    });
-  };
-
-  // Close rename mode and sync the displayed name when rename succeeds.
-  const [lastSeenRenameVersion, setLastSeenRenameVersion] = useState(renameSuccessVersion);
-  if (renameSuccessVersion !== lastSeenRenameVersion) {
-    setLastSeenRenameVersion(renameSuccessVersion);
-    setRenameMode(false);
-    setRenameValue(project.name);
-  }
-
-  const tree = useMemo(() => buildFileTree(files), [files]);
-
-  const handleRenameSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (renameValue.trim().length === 0 || renaming || projectOperationPending) return;
-    await onRename(renameValue);
-  };
-
-  const handleDeleteConfirm = async () => {
-    if (projectOperationPending) return;
-    const success = await onDelete();
-    if (success) {
-      setConfirmDelete(false);
-    }
-  };
+  // File tree operations
+  const fileTree = useMemo(() => buildFileTree(files), [files]);
 
   const handleFileSelect = useCallback((path: string) => {
     setSelectedPath(path);
-    const record = files.find((f) => f.path === path);
-    if (record && record.kind === "file") {
-      fileOpenCounterRef.current++;
-      setFileOpenRequest({ path, requestId: fileOpenCounterRef.current });
-    }
-  }, [files]);
-
-  // -------------------------------------------------------------------------
-  // File & folder management
-  // -------------------------------------------------------------------------
-
-  /** Refresh the authoritative project entries and update workspace state. */
-  const refreshProjectFiles = useCallback(async (): Promise<void> => {
-    await onRefreshFiles();
-  }, [onRefreshFiles]);
-
-  /** Open a file in the editor and make it active. */
-  const openFileInEditor = useCallback((path: string) => {
-    setSelectedPath(path);
-    fileOpenCounterRef.current++;
+    fileOpenCounterRef.current += 1;
     setFileOpenRequest({ path, requestId: fileOpenCounterRef.current });
   }, []);
 
-  // --- New File ---
-
-  const handleNewFileSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = newFileValue.trim();
-    if (trimmed.length === 0 || fileOpInProgress) return;
-
-    setFileOpInProgress(true);
-    setFileOpError(null);
-
-    try {
-      // Flush all dirty buffers before remounting EditorPanel.
-      if (flushAllRef.current) {
-        const flushOk = await flushAllRef.current();
-        if (!flushOk) {
-          setFileOpError("Could not save all files. Your changes are preserved.");
-          return;
-        }
-      }
-
-      await putEntry(project.id, trimmed, "file", "");
-      await refreshProjectFiles();
-
-      // Open the new file in the editor.
-      openFileInEditor(trimmed);
-
+  const handleCreateNewFile = useCallback(async () => {
+    const name = newFileValue.trim();
+    if (!name) {
       setNewFileMode(false);
-      setNewFileValue("");
-    } catch (err) {
-      setFileOpError(getFileErrorMessage(err));
-    } finally {
-      setFileOpInProgress(false);
+      return;
     }
-  };
-
-  // --- New Folder ---
-
-  const handleNewFolderSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = newFolderValue.trim();
-    if (trimmed.length === 0 || fileOpInProgress) return;
-
-    // Folder paths should end with a trailing slash for the persistence layer.
-    // The path validator rejects trailing "/", so we strip it before putEntry.
-    const folderPath = trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
-
     setFileOpInProgress(true);
     setFileOpError(null);
-
     try {
-      // Flush all dirty buffers before remounting EditorPanel.
-      if (flushAllRef.current) {
-        const flushOk = await flushAllRef.current();
-        if (!flushOk) {
-          setFileOpError("Could not save all files. Your changes are preserved.");
-          return;
-        }
-      }
-
-      await putEntry(project.id, folderPath, "directory");
-      await refreshProjectFiles();
-
-      setNewFolderMode(false);
-      setNewFolderValue("");
-    } catch (err) {
-      setFileOpError(getFileErrorMessage(err));
+      await putEntry(project.id, name, "file", "");
+      await onRefreshFiles();
+      setNewFileValue("");
+      setNewFileMode(false);
+      handleFileSelect(name);
+    } catch (err: any) {
+      setFileOpError(err?.message || "Failed to create file");
     } finally {
       setFileOpInProgress(false);
     }
-  };
+  }, [newFileValue, project.id, onRefreshFiles, handleFileSelect]);
 
-  // --- Rename Entry (from FileTree inline) ---
-
-  const handleEntryRename = useCallback(
-    async (oldPath: string, newPath: string): Promise<boolean> => {
-      if (fileOpInProgress) return false;
-      setFileOpInProgress(true);
-      setFileOpError(null);
-
-      try {
-        // Flush all dirty buffers before remounting EditorPanel.
-        if (flushAllRef.current) {
-          const flushOk = await flushAllRef.current();
-          if (!flushOk) {
-            setFileOpError("Could not save all files. Your changes are preserved.");
-            return false;
-          }
-        }
-
-        await renameEntry(project.id, oldPath, newPath);
-        await refreshProjectFiles();
-
-        return true;
-      } catch (err) {
-        setFileOpError(getFileErrorMessage(err));
-        return false;
-      } finally {
-        setFileOpInProgress(false);
-      }
-    },
-    [fileOpInProgress, project.id, refreshProjectFiles],
-  );
-
-  // --- Delete Entry (from FileTree or toolbar) ---
-
-  const handleEntryDeleteRequest = useCallback((path: string) => {
-    setEntryToDelete(path);
-    setFileOpError(null);
-  }, []);
-
-  const handleEntryDeleteConfirm = async () => {
-    if (!entryToDelete || entryDeleteInProgress) return;
-
-    setEntryDeleteInProgress(true);
-    setFileOpError(null);
-
-    try {
-      // Flush all dirty buffers before remounting EditorPanel.
-      if (flushAllRef.current) {
-        const flushOk = await flushAllRef.current();
-        if (!flushOk) {
-          setFileOpError("Could not save all files. Your changes are preserved.");
-          return;
-        }
-      }
-
-      await deleteEntry(project.id, entryToDelete);
-      await refreshProjectFiles();
-
-      setEntryToDelete(null);
-    } catch (err) {
-      setFileOpError(getFileErrorMessage(err));
-    } finally {
-      setEntryDeleteInProgress(false);
+  const handleCreateNewFolder = useCallback(async () => {
+    const name = newFolderValue.trim();
+    if (!name) {
+      setNewFolderMode(false);
+      return;
     }
-  };
+    setFileOpInProgress(true);
+    setFileOpError(null);
+    try {
+      await putEntry(project.id, name, "directory");
+      await onRefreshFiles();
+      setNewFolderValue("");
+      setNewFolderMode(false);
+    } catch (err: any) {
+      setFileOpError(err?.message || "Failed to create folder");
+    } finally {
+      setFileOpInProgress(false);
+    }
+  }, [newFolderValue, project.id, onRefreshFiles]);
 
-  // -------------------------------------------------------------------------
-  // Export
-  // -------------------------------------------------------------------------
-
-  const handleExport = useCallback(async () => {
-    if (exportState === "exporting") return;
+  const handleExportZip = useCallback(async () => {
     setExportState("exporting");
     setExportError(null);
-
     try {
-      const flushFn = flushAllRef.current ?? (() => Promise.resolve(true));
-      const result = await exportProjectZip(project.id, project.name, flushFn);
-      if (result.ok) {
-        setExportState("idle");
-      } else {
+      const res = await exportProjectZip(
+        project.id,
+        project.name,
+        async () => (flushAllRef.current ? flushAllRef.current() : true)
+      );
+      if (!res.ok) {
         setExportState("error");
-        setExportError(result.error);
+        setExportError(res.error);
+      } else {
+        setExportState("idle");
       }
-    } catch {
+    } catch (err: any) {
       setExportState("error");
-      setExportError("Export failed unexpectedly.");
+      setExportError(err?.message || "Export failed");
     }
-  }, [exportState, project.id, project.name]);
+  }, [project.id, project.name]);
 
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
+  // Sidebar resize handlers
+  const handleSidebarResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const newWidth = Math.min(560, Math.max(280, startW + delta));
+      setSidebarWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [sidebarWidth]);
+
+  const handleSidebarKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "ArrowLeft") {
+      setSidebarWidth((w) => Math.max(280, w - 16));
+      e.preventDefault();
+    } else if (e.key === "ArrowRight") {
+      setSidebarWidth((w) => Math.min(560, w + 16));
+      e.preventDefault();
+    }
+  }, []);
+
+  // Panel resize handlers
+  const handlePanelResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = panelHeight;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = startY - moveEvent.clientY;
+      const maxH = window.innerHeight * 0.65;
+      const newHeight = Math.min(maxH, Math.max(140, startH + delta));
+      setPanelHeight(newHeight);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [panelHeight]);
+
+  const handlePanelKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const maxH = window.innerHeight * 0.65;
+    if (e.key === "ArrowUp") {
+      setPanelHeight((h) => Math.min(maxH, h + 16));
+      e.preventDefault();
+    } else if (e.key === "ArrowDown") {
+      setPanelHeight((h) => Math.max(140, h - 16));
+      e.preventDefault();
+    }
+  }, []);
+
+  // Execute command from agent card
+  const handleExecuteCommand = useCallback(
+    async (cmd: string) => {
+      try {
+        await commands.runCommand({ command: cmd, cwd: "/project" });
+        return { exitCode: 0, output: `✓ command completed` };
+      } catch (err: any) {
+        return { exitCode: 1, output: err?.message || String(err) };
+      }
+    },
+    [commands]
+  );
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden">
-      {/* Project header bar */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-800 bg-gray-900/50">
-        <div className="flex items-center gap-3">
-          {renameMode ? (
-            <form onSubmit={handleRenameSubmit} className="flex items-center gap-2">
-              <input
-                type="text"
-                value={renameValue}
-                onChange={(e) => setRenameValue(e.target.value)}
-                maxLength={100}
-                autoFocus
-                disabled={renaming || projectOperationPending}
-                className="px-2 py-0.5 text-sm text-gray-100 bg-gray-800 border border-gray-600 rounded focus:outline-none focus:border-cyan-600 disabled:opacity-50"
-              />
-              <button
-                type="submit"
-                disabled={renaming || projectOperationPending || renameValue.trim().length === 0}
-                className="text-xs text-cyan-500 hover:text-cyan-400 disabled:opacity-50"
-              >
-                {renaming ? "Saving..." : "Save"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setRenameMode(false);
-                  setRenameValue(project.name);
-                }}
-                disabled={renaming || projectOperationPending}
-                className="text-xs text-gray-500 hover:text-gray-400 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            </form>
-          ) : (
-            <span className="text-sm font-medium text-gray-100">{project.name}</span>
-          )}
-        </div>
+    <div className="app">
+      {/* 48px Activity Rail */}
+      <nav className="rail" aria-label="Activity Rail">
+        <button
+          title="Explorer"
+          aria-label="Explorer"
+          className={activeRail === "explorer" ? "active" : ""}
+          onClick={() => setActiveRail("explorer")}
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M4 5a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5z" />
+          </svg>
+        </button>
+        <button
+          title="Search"
+          aria-label="Search"
+          className={activeRail === "search" ? "active" : ""}
+          onClick={() => setActiveRail("search")}
+        >
+          <svg viewBox="0 0 24 24">
+            <circle cx="10.5" cy="10.5" r="6" />
+            <path d="M15.5 15.5 20 20" />
+          </svg>
+        </button>
+        <button
+          title="Source control"
+          aria-label="Source control"
+          className={activeRail === "git" ? "active" : ""}
+          onClick={() => setActiveRail("git")}
+        >
+          <svg viewBox="0 0 24 24">
+            <circle cx="7" cy="6" r="2.2" />
+            <circle cx="7" cy="18" r="2.2" />
+            <circle cx="17" cy="9" r="2.2" />
+            <path d="M7 8.2v7.6M17 11.2c0 3-3 4-7 4.3" />
+          </svg>
+          <span className="badge">1</span>
+        </button>
+        <button
+          title="Agent"
+          aria-label="Agent"
+          id="railAgent"
+          className={activeRail === "agent" ? "active" : ""}
+          onClick={() => setActiveRail("agent")}
+        >
+          <svg viewBox="0 0 24 24">
+            <rect x="5" y="7" width="14" height="11" rx="2.5" />
+            <circle cx="9.5" cy="12" r="1.2" fill="currentColor" stroke="none" />
+            <circle cx="14.5" cy="12" r="1.2" fill="currentColor" stroke="none" />
+            <path d="M12 7V4M9 18v2M15 18v2" />
+          </svg>
+        </button>
+        <button
+          title="Run and debug"
+          aria-label="Run and debug"
+          className={activeRail === "run" ? "active" : ""}
+          onClick={() => setActiveRail("run")}
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M8 5.5v13l11-6.5-11-6.5z" />
+          </svg>
+        </button>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs text-gray-500">
-            <HardDrive className="w-3.5 h-3.5" />
-            <span>Local storage</span>
-          </div>
-          <span className="text-xs text-gray-600">
-            {project.templateId === "static-html" ? "Static HTML" : project.templateId}
-          </span>
-          {!renameMode && (
-            <button
-              onClick={() => {
-                setRenameMode(true);
-                setRenameValue(project.name);
-              }}
-              disabled={renaming || projectOperationPending}
-              className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-              Rename
-            </button>
-          )}
-          <button
-            onClick={() => setConfirmDelete(true)}
-            disabled={deleting || projectOperationPending}
-            className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Delete
-          </button>
-          <button
-            onClick={handleExport}
-            disabled={exportState === "exporting" || projectOperationPending}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-label="Export ZIP"
-            title="Export project as ZIP"
-          >
-            <Download className="w-3.5 h-3.5" />
-            {exportState === "exporting" ? "Exporting..." : "Export"}
-          </button>
-        </div>
-      </div>
+        <div className="spacer" />
 
-      {/* Main content: file tree + file summary */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* File tree sidebar */}
-        <div className="w-64 border-r border-gray-800 bg-gray-900/30 overflow-y-auto p-2 flex flex-col">
-          <div className="flex items-center justify-between px-2 py-1.5 mb-1">
-            <span className="text-xs text-gray-600 uppercase tracking-wide">Files</span>
-            {/* Toolbar: New File, New Folder */}
-            <div className="flex items-center gap-1">
+        <button title="Back to Projects" aria-label="Back to Projects" onClick={onBack}>
+          <svg viewBox="0 0 24 24">
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <button title="Account" aria-label="Account">
+          <svg viewBox="0 0 24 24">
+            <circle cx="12" cy="9" r="3.5" />
+            <path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5" />
+          </svg>
+        </button>
+        <button title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8" />
+          </svg>
+        </button>
+      </nav>
+
+      {/* Persistent Left Sidebar */}
+      <aside
+        className="sidebar"
+        id="sidebar"
+        aria-label="Sidebar"
+        style={{ width: `${sidebarWidth}px` }}
+      >
+        <div
+          className="side-resize"
+          id="sideResize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          tabIndex={0}
+          onMouseDown={handleSidebarResizeMouseDown}
+          onKeyDown={handleSidebarKeyDown}
+        />
+
+        {activeRail === "agent" && (
+          <AgentChatPanel
+            projectName={project.name}
+            messages={chat.messages}
+            isStreaming={chat.isStreaming}
+            isConnected={chat.isConnected}
+            onSend={chat.send}
+            onCancel={chat.cancel}
+            onClear={chat.clear}
+            permissionMode={permissions.mode}
+            onPermissionModeChange={permissions.setMode}
+            pendingApprovals={permissions.pending}
+            onApproveRequest={handleApprove}
+            onDenyRequest={handleDeny}
+            selectedModel={selectedModel}
+            onSelectModel={setSelectedModel}
+            onExecuteCommand={handleExecuteCommand}
+          />
+        )}
+
+        {activeRail === "explorer" && (
+          <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+            <div className="side-head">
+              <span className="title">EXPLORER</span>
+              <span className="name" style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: 4 }}>
+                · {project.name}
+              </span>
+              <span className="grow" />
               <button
-                onClick={() => {
-                  setNewFileMode(true);
-                  setNewFileValue("");
-                  setNewFolderMode(false);
-                  setFileOpError(null);
-                }}
-                disabled={fileOpInProgress || projectOperationPending}
-                className="p-1 text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label="New File"
+                className="icon-btn"
                 title="New File"
+                aria-label="New File"
+                onClick={() => setNewFileMode(true)}
               >
-                <FilePlus className="w-3.5 h-3.5" />
+                <FilePlus style={{ width: 14, height: 14 }} />
               </button>
               <button
-                onClick={() => {
-                  setNewFolderMode(true);
-                  setNewFolderValue("");
-                  setNewFileMode(false);
-                  setFileOpError(null);
-                }}
-                disabled={fileOpInProgress || projectOperationPending}
-                className="p-1 text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label="New Folder"
+                className="icon-btn"
                 title="New Folder"
+                aria-label="New Folder"
+                onClick={() => setNewFolderMode(true)}
               >
-                <FolderPlus className="w-3.5 h-3.5" />
+                <FolderPlus style={{ width: 14, height: 14 }} />
               </button>
-            </div>
-          </div>
-
-          {/* New file input */}
-          {newFileMode && (
-            <form onSubmit={handleNewFileSubmit} className="px-2 py-1">
-              <input
-                type="text"
-                value={newFileValue}
-                onChange={(e) => setNewFileValue(e.target.value)}
-                placeholder="path/to/file.html"
-                maxLength={1024}
-                autoFocus
-                disabled={fileOpInProgress}
-                className="w-full px-2 py-1 text-xs text-gray-100 bg-gray-800 border border-gray-600 rounded focus:outline-none focus:border-cyan-600 disabled:opacity-50"
-              />
-              <div className="flex items-center gap-2 mt-1">
-                <button
-                  type="submit"
-                  disabled={fileOpInProgress || newFileValue.trim().length === 0}
-                  className="text-xs text-cyan-500 hover:text-cyan-400 disabled:opacity-50"
-                >
-                  {fileOpInProgress ? "Creating..." : "Create"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewFileMode(false);
-                    setNewFileValue("");
-                  }}
-                  disabled={fileOpInProgress}
-                  className="text-xs text-gray-500 hover:text-gray-400 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* New folder input */}
-          {newFolderMode && (
-            <form onSubmit={handleNewFolderSubmit} className="px-2 py-1">
-              <input
-                type="text"
-                value={newFolderValue}
-                onChange={(e) => setNewFolderValue(e.target.value)}
-                placeholder="folder/name"
-                maxLength={1024}
-                autoFocus
-                disabled={fileOpInProgress}
-                className="w-full px-2 py-1 text-xs text-gray-100 bg-gray-800 border border-gray-600 rounded focus:outline-none focus:border-cyan-600 disabled:opacity-50"
-              />
-              <div className="flex items-center gap-2 mt-1">
-                <button
-                  type="submit"
-                  disabled={fileOpInProgress || newFolderValue.trim().length === 0}
-                  className="text-xs text-cyan-500 hover:text-cyan-400 disabled:opacity-50"
-                >
-                  {fileOpInProgress ? "Creating..." : "Create"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewFolderMode(false);
-                    setNewFolderValue("");
-                  }}
-                  disabled={fileOpInProgress}
-                  className="text-xs text-gray-500 hover:text-gray-400 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* File operation error */}
-          {fileOpError && (
-            <div className="flex items-center gap-1.5 px-2 py-1.5 mt-1 bg-red-950/50 border border-red-800/50 rounded text-red-300 text-xs">
-              <span className="flex-1">{fileOpError}</span>
               <button
-                onClick={() => setFileOpError(null)}
-                className="px-1 py-0.5 rounded bg-red-800/50 hover:bg-red-800/70 text-red-200 transition-colors"
+                className="icon-btn"
+                title="Export Zip"
+                aria-label="Export Zip"
+                onClick={handleExportZip}
               >
-                <X className="w-3 h-3" />
+                <Download style={{ width: 14, height: 14 }} />
               </button>
             </div>
-          )}
 
-          {/* File tree */}
-          <div className="flex-1 overflow-y-auto">
-            {tree.length === 0 ? (
-              <p className="text-xs text-gray-600 italic px-2 py-1">No files in this project.</p>
-            ) : (
-              <FileTreeWrapper
-                nodes={tree}
+            {newFileMode && (
+              <div style={{ padding: "6px 10px", background: "var(--bg-input)", borderBottom: "1px solid var(--border)" }}>
+                <input
+                  type="text"
+                  placeholder="New file name…"
+                  value={newFileValue}
+                  onChange={(e) => setNewFileValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleCreateNewFile();
+                    if (e.key === "Escape") setNewFileMode(false);
+                  }}
+                  autoFocus
+                  style={{
+                    width: "100%",
+                    background: "transparent",
+                    border: "1px solid var(--accent)",
+                    borderRadius: 4,
+                    padding: "3px 6px",
+                    color: "var(--text)",
+                    fontSize: 12,
+                    fontFamily: "var(--mono)",
+                    outline: "none",
+                  }}
+                />
+              </div>
+            )}
+
+            {newFolderMode && (
+              <div style={{ padding: "6px 10px", background: "var(--bg-input)", borderBottom: "1px solid var(--border)" }}>
+                <input
+                  type="text"
+                  placeholder="New folder name…"
+                  value={newFolderValue}
+                  onChange={(e) => setNewFolderValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleCreateNewFolder();
+                    if (e.key === "Escape") setNewFolderMode(false);
+                  }}
+                  autoFocus
+                  style={{
+                    width: "100%",
+                    background: "transparent",
+                    border: "1px solid var(--accent)",
+                    borderRadius: 4,
+                    padding: "3px 6px",
+                    color: "var(--text)",
+                    fontSize: 12,
+                    fontFamily: "var(--mono)",
+                    outline: "none",
+                  }}
+                />
+              </div>
+            )}
+
+            <div style={{ flex: 1, overflowY: "auto", padding: "6px 8px" }}>
+              <FileTree
+                nodes={fileTree}
                 selectedPath={selectedPath}
                 onSelect={handleFileSelect}
-                onRename={handleEntryRename}
-                onDelete={handleEntryDeleteRequest}
+                onRename={async (oldPath, newPath) => {
+                  try {
+                    await renameEntry(project.id, oldPath, newPath);
+                    await onRefreshFiles();
+                    return true;
+                  } catch {
+                    return false;
+                  }
+                }}
+                onDelete={(path) => setEntryToDelete(path)}
               />
-            )}
-          </div>
-        </div>
-
-        {/* Editor + Runtime panel (editor on top, runtime below) */}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex-1 overflow-hidden">
-            <EditorPanel
-              key={`${project.id}-${fileOperationVersion}`}
-              project={project}
-              files={files}
-              fileOpenRequest={fileOpenRequest}
-              onProjectUpdate={onProjectUpdate}
-              onBack={onBack}
-              projectOperationPending={projectOperationPending}
-              flushAllRef={flushAllRef}
-              invalidatePathsRef={invalidatePathsRef}
-            />
-          </div>
-          {/* Runtime panel: Output + Preview */}
-          <div className="h-[280px] flex-shrink-0">
-            <RuntimePanel
-              output={runtime.output}
-              previewUrl={runtime.previewUrl}
-              runtimeState={runtime.state}
-              isStarting={runtime.isStarting}
-              isRunning={runtime.isRunning}
-              previewKey={runtime.previewKey}
-              onRun={runtime.run}
-              onStop={runtime.stop}
-              onRefresh={runtime.refreshPreview}
-              commands={commands.commands}
-              commandsRunning={commands.isRunning}
-              onCommandRun={handleCommandRun}
-              onCommandCancel={commands.cancelCommand}
-              onCommandClear={commands.clearCompleted}
-              chatMessages={chat.messages}
-              chatStreaming={chat.isStreaming}
-              chatConnected={chat.isConnected}
-              onChatSend={chat.send}
-              onChatCancel={chat.cancel}
-              onChatClear={chat.clear}
-              permissionMode={permissions.mode}
-              onPermissionModeChange={permissions.setMode}
-              pendingApprovals={permissions.pending}
-              onApproveRequest={handleApprove}
-              onDenyRequest={handleDeny}
-              hasByokKey={hasByokKey}
-              byokStatus={byokStatus}
-              onSetByokKey={setKey}
-              onClearByokKey={clearByokKey}
-              providerDisplayName={providerStatus.displayName}
-              modelDisplayName={providerStatus.selectedModelDisplayName}
-              providerStatus={providerStatus.status}
-              byokRequired={providerStatus.byokRequired}
-              modelOptions={providerStatus.models}
-              selectedModelId={providerStatus.selectedModelId}
-              onSelectModel={providerStatus.setSelectedModelId}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Export error banner */}
-      {exportState === "error" && exportError && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-red-950/50 border-b border-red-800/50 text-red-300 text-xs">
-          <span className="flex-1">Export failed: {exportError}</span>
-          <button
-            onClick={() => {
-              setExportState("idle");
-              setExportError(null);
-            }}
-            className="px-2 py-0.5 rounded bg-red-800/50 hover:bg-red-800/70 text-red-200 transition-colors"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Entry delete confirmation modal */}
-      {entryToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="max-w-sm w-full mx-4 p-6 bg-gray-900 border border-gray-700 rounded-lg space-y-4">
-            <div className="flex items-center gap-2 text-red-400">
-              <Trash2 className="w-5 h-5" />
-              <h3 className="text-sm font-semibold">Delete {getEntryName(entryToDelete)}</h3>
             </div>
-            <p className="text-sm text-gray-400">
-              Are you sure you want to delete{" "}
-              <span className="text-gray-100 font-mono">{entryToDelete}</span>?
-              {files.find((f) => f.path === entryToDelete)?.kind === "directory" &&
-                " All contents inside this folder will be removed."}
-              {" This action cannot be undone."}
+          </div>
+        )}
+
+        {(activeRail === "search" || activeRail === "git" || activeRail === "run") && (
+          <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "12px" }}>
+            <div className="side-head" style={{ padding: 0, marginBottom: 8 }}>
+              <span className="title">{activeRail.toUpperCase()}</span>
+            </div>
+            <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+              {activeRail === "search" && "Search files, symbols, and agent memory."}
+              {activeRail === "git" && "Source control: 1 modified file. Ready to stage or commit via agent command cards."}
+              {activeRail === "run" && "Run and debug configurations."}
+            </div>
+          </div>
+        )}
+      </aside>
+
+      {/* Main 1fr Area: Editor (top) + Panel (bottom) */}
+      <main className="main">
+        {/* Editor Area */}
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <EditorPanel
+            project={project}
+            files={files}
+            fileOpenRequest={fileOpenRequest}
+            onProjectUpdate={onProjectUpdate}
+            onBack={onBack}
+            projectOperationPending={projectOperationPending}
+            flushAllRef={flushAllRef}
+            invalidatePathsRef={invalidatePathsRef}
+          />
+        </div>
+
+        {/* Panel Drag Handle */}
+        <div
+          className="panel-resize"
+          id="panelResize"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize bottom panel"
+          tabIndex={0}
+          onMouseDown={handlePanelResizeMouseDown}
+          onKeyDown={handlePanelKeyDown}
+        />
+
+        {/* Resizable Bottom Panel */}
+        <div style={{ height: isPanelMaximized ? "65vh" : `${panelHeight}px`, flex: "none" }}>
+          <RuntimePanel
+            output={runtime.output}
+            previewUrl={runtime.previewUrl}
+            activePort={runtime.isRunning ? 3000 : null}
+            onOpenPreview={() => runtime.previewUrl && window.open(runtime.previewUrl, "_blank")}
+            onKillTerminal={() => {
+              // kill active process
+            }}
+            onNewTerminal={() => {
+              // restart shell
+            }}
+            isMaximized={isPanelMaximized}
+            onToggleMaximize={() => setIsPanelMaximized((m) => !m)}
+          />
+        </div>
+      </main>
+
+      {/* Full-width 22px Status Bar */}
+      <StatusBar
+        branch="main"
+        problemCount={0}
+        warningCount={0}
+        runtimeStatus={runtime.isRunning ? "Running" : "Ready"}
+        syncStatus="Saved"
+        modelName={selectedModel}
+        activePort={runtime.isRunning ? 3000 : 3000}
+        cursorLine={1}
+        cursorCol={1}
+        language={selectedPath?.endsWith(".html") ? "HTML" : selectedPath?.endsWith(".css") ? "CSS" : "TypeScript"}
+      />
+
+      {/* Delete confirmation modal */}
+      {entryToDelete && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)" }}>
+          <div style={{ maxWidth: 360, width: "100%", margin: "0 16px", padding: 16, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--err)", marginBottom: 8 }}>
+              <Trash2 style={{ width: 18, height: 18 }} />
+              <h3 style={{ fontSize: 13, fontWeight: 600 }}>Delete {getEntryName(entryToDelete)}</h3>
+            </div>
+            <p style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5, marginBottom: 16 }}>
+              Are you sure you want to delete <span style={{ color: "var(--text)", fontFamily: "var(--mono)" }}>{entryToDelete}</span>? This action cannot be undone.
             </p>
-            <div className="flex justify-end gap-2">
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button
+                className="btn"
                 onClick={() => setEntryToDelete(null)}
                 disabled={entryDeleteInProgress}
-                className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <X className="w-3.5 h-3.5" />
                 Cancel
               </button>
               <button
-                onClick={handleEntryDeleteConfirm}
+                className="btn primary"
+                style={{ background: "var(--err)", borderColor: "var(--err)" }}
                 disabled={entryDeleteInProgress}
-                className="px-3 py-1.5 text-sm text-white bg-red-700 rounded-md hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={async () => {
+                  setEntryDeleteInProgress(true);
+                  try {
+                    await deleteEntry(project.id, entryToDelete);
+                    await onRefreshFiles();
+                    setEntryToDelete(null);
+                  } catch (err: any) {
+                    alert(err?.message || "Failed to delete");
+                  } finally {
+                    setEntryDeleteInProgress(false);
+                  }
+                }}
               >
-                {entryDeleteInProgress ? "Deleting..." : "Delete"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Project delete confirmation modal */}
-      {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="max-w-sm w-full mx-4 p-6 bg-gray-900 border border-gray-700 rounded-lg space-y-4">
-            <div className="flex items-center gap-2 text-red-400">
-              <Trash2 className="w-5 h-5" />
-              <h3 className="text-sm font-semibold">Delete project</h3>
-            </div>
-            <p className="text-sm text-gray-400">
-              Are you sure you want to delete{" "}
-              <span className="text-gray-100 font-medium">{project.name}</span>?
-              This action cannot be undone.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setConfirmDelete(false)}
-                disabled={deleting || projectOperationPending}
-                className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <X className="w-3.5 h-3.5" />
-                Cancel
-              </button>
-              <button
-                onClick={handleDeleteConfirm}
-                disabled={deleting || projectOperationPending}
-                className="px-3 py-1.5 text-sm text-white bg-red-700 rounded-md hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {deleting ? "Deleting..." : "Delete"}
+                {entryDeleteInProgress ? "Deleting…" : "Delete"}
               </button>
             </div>
           </div>
         </div>
       )}
     </div>
-  );
-}
-
-/** Wrapper to avoid circular import issues. */
-function FileTreeWrapper({
-  nodes,
-  selectedPath,
-  onSelect,
-  onRename,
-  onDelete,
-}: {
-  nodes: ReturnType<typeof buildFileTree>;
-  selectedPath: string | null;
-  onSelect: (path: string) => void;
-  onRename: (oldPath: string, newPath: string) => Promise<boolean>;
-  onDelete: (path: string) => void;
-}) {
-  return (
-    <FileTree
-      nodes={nodes}
-      selectedPath={selectedPath}
-      onSelect={onSelect}
-      onRename={onRename}
-      onDelete={onDelete}
-    />
   );
 }

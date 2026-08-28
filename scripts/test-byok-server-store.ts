@@ -14,7 +14,7 @@ async function main() {
 
   // 1. Save BYOK Credential on Server
   console.log("--- 1. Save & Server-Side Encryption ---");
-  const saveResult = await saveServerByok(userId, "anthropic", rawKey);
+  const saveResult = await saveServerByok(userId, "anthropic", rawKey, { skipProbe: true });
   assert.equal(saveResult.ok, true, "Save operation succeeds");
   assert.ok(saveResult.record, "Returns client-safe record");
 

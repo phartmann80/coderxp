@@ -86,7 +86,7 @@ export async function saveServerByok(
   userId: string,
   providerId: ByokProviderId,
   apiKey: string,
-  options: { baseUrl?: string; mode?: "local" | "cloud" } = {},
+  options: { baseUrl?: string; mode?: "local" | "cloud"; skipProbe?: boolean } = {},
 ): Promise<{ ok: boolean; record?: ClientByokRecord; error?: string }> {
   const def = BYOK_PROVIDER_DEFS[providerId];
   if (!def) {
@@ -122,41 +122,43 @@ export async function saveServerByok(
 
   // Perform live models validation probe from server
   let discoveredModels: ByokModelDescriptor[] = [];
-  try {
-    let probeUrl = `${targetBaseUrl}/models`;
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${apiKey.trim()}`,
-      Accept: "application/json",
-    };
+  if (!options.skipProbe) {
+    try {
+      let probeUrl = `${targetBaseUrl}/models`;
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${apiKey.trim()}`,
+        Accept: "application/json",
+      };
 
-    if (providerId === "anthropic") {
-      headers["x-api-key"] = apiKey.trim();
-      headers["anthropic-version"] = "2023-06-01";
-      delete headers.Authorization;
-    } else if (providerId === "gemini") {
-      probeUrl = `${targetBaseUrl}/models?key=${apiKey.trim()}`;
-      delete headers.Authorization;
-    }
-
-    const res = await fetch(probeUrl, { method: "GET", headers });
-    if (res.ok) {
-      const data = await res.json().catch(() => ({}));
-      if (Array.isArray(data.data)) {
-        discoveredModels = data.data.map((m: any) => ({
-          id: m.id || m.name,
-          name: m.id || m.name,
-        }));
-      } else if (Array.isArray(data.models)) {
-        discoveredModels = data.models.map((m: any) => ({
-          id: (m.name || m.id).replace("models/", ""),
-          name: (m.displayName || m.name || m.id).replace("models/", ""),
-        }));
+      if (providerId === "anthropic") {
+        headers["x-api-key"] = apiKey.trim();
+        headers["anthropic-version"] = "2023-06-01";
+        delete headers.Authorization;
+      } else if (providerId === "gemini") {
+        probeUrl = `${targetBaseUrl}/models?key=${apiKey.trim()}`;
+        delete headers.Authorization;
       }
-    } else if (res.status === 401 || res.status === 403) {
-      return { ok: false, error: "Authentication failed. The provided API key was rejected." };
+
+      const res = await fetch(probeUrl, { method: "GET", headers });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (Array.isArray(data.data)) {
+          discoveredModels = data.data.map((m: any) => ({
+            id: m.id || m.name,
+            name: m.id || m.name,
+          }));
+        } else if (Array.isArray(data.models)) {
+          discoveredModels = data.models.map((m: any) => ({
+            id: (m.name || m.id).replace("models/", ""),
+            name: (m.displayName || m.name || m.id).replace("models/", ""),
+          }));
+        }
+      } else if (res.status === 401 || res.status === 403) {
+        return { ok: false, error: "Authentication failed. The provided API key was rejected." };
+      }
+    } catch {
+      // If upstream models endpoint is not directly probeable, fallback cleanly
     }
-  } catch {
-    // If upstream models endpoint is not directly probeable, fallback cleanly
   }
 
   // If live probe didn't return models, use default models clearly marked

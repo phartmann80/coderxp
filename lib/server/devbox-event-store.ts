@@ -14,7 +14,7 @@ import type { ProjectEvent, ProjectEventType, EventTier, EventActor } from "../d
 
 interface ProjectEventStoreState {
   currentSeq: number;
-  events: ProjectEvent[];
+  events: ProjectEvent<any>[];
 }
 
 class HostEventStore extends EventEmitter {
@@ -73,7 +73,7 @@ class HostEventStore extends EventEmitter {
     return event;
   }
 
-  getEvents(projectId: string, fromSeq = 0): ProjectEvent[] {
+  getEvents(projectId: string, fromSeq = 0): ProjectEvent<any>[] {
     const store = this.projectStores.get(projectId);
     if (!store) return [];
     return store.events.filter((e) => e.seq >= fromSeq).map((e) => ({ ...e }));

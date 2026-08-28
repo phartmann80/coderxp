@@ -90,7 +90,7 @@ export class McpClient {
       const cmdParts = [this.config.endpointOrCommand, ...(this.config.args ?? [])];
       const riskEvaluation = evaluateCommandRisk(cmdParts, "autonomous");
 
-      if (riskEvaluation.destructive) {
+      if (riskEvaluation.risk === "destructive") {
         return {
           ok: false,
           tools: [],

@@ -17,6 +17,7 @@ import { recordPrePushSnapshot } from "../devbox/git-snapshot";
 import { devboxKillSwitch } from "../devbox/kill-switch";
 import { devboxMetering } from "../devbox/metering";
 import { StreamingRedactor } from "../workspace/agent-process-stream";
+import { hostEventStore } from "./devbox-event-store";
 import {
   MAX_GLOBAL_CONCURRENT_DEVBOXES,
   DEVBOX_PURGE_GRACE_PERIOD_MS,
@@ -245,6 +246,20 @@ class DevboxBroker extends EventEmitter {
       session.activeChildProcesses = [];
       devboxMetering.stopSession(projectId);
     }
+
+    // Automatically emit authoritative lifecycle event from broker
+    hostEventStore.recordEvent({
+      projectId,
+      tier: "T1",
+      type: "devbox.lifecycle",
+      data: {
+        title: "Devbox soft-deleted to pending-purge (7-day recovery grace period)",
+        status: "pending-purge",
+        gracePeriodDays: 7,
+        purgeAt,
+      },
+    });
+
     return { ok: true, purgeAt };
   }
 
@@ -257,20 +272,45 @@ class DevboxBroker extends EventEmitter {
       devboxMetering.stopSession(projectId);
       this.sessions.delete(projectId);
     }
+
+    // Automatically emit authoritative lifecycle event from broker
+    hostEventStore.recordEvent({
+      projectId,
+      tier: "T1",
+      type: "devbox.lifecycle",
+      data: {
+        title: "Devbox permanently purged (audit logs retained)",
+        status: "purged",
+      },
+    });
+
     return { ok: true, purged: true };
   }
 
   /**
    * Restores a Devbox from pending-purge.
    */
-  async restoreDevbox(projectId: string): Promise<{ ok: boolean; status?: DevboxStatus }> {
+  async restoreDevbox(projectId: string): Promise<{ ok: boolean; state: DevboxState }> {
     const session = this.sessions.get(projectId);
-    if (session && session.state === "pending-purge") {
-      delete session.purgeAt;
-      session.state = "stopped";
-      return { ok: true, status: this.getStatus(projectId) };
+    if (!session || session.state !== "pending-purge") {
+      return { ok: false, state: session?.state || "destroyed" };
     }
-    return { ok: false };
+
+    session.state = "stopped";
+    session.purgeAt = undefined;
+
+    // Automatically emit authoritative lifecycle event from broker
+    hostEventStore.recordEvent({
+      projectId,
+      tier: "T1",
+      type: "devbox.lifecycle",
+      data: {
+        title: "Devbox restored from pending-purge",
+        status: "stopped",
+      },
+    });
+
+    return { ok: true, state: "stopped" };
   }
 
   /**

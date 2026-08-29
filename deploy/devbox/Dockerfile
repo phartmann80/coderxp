@@ -56,10 +56,15 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 # Create workspace directory
 WORKDIR /workspace
 
+# Copy and install custom git credential helper for T3 enforcement
+COPY deploy/devbox/coderxp-git-credential /usr/local/bin/coderxp-git-credential
+RUN chmod +x /usr/local/bin/coderxp-git-credential
+
 # Configure default git behavior and custom credential helper script
 RUN git config --system init.defaultBranch main && \
     git config --system core.autocrlf false && \
-    git config --system safe.directory '*'
+    git config --system safe.directory '*' && \
+    git config --system credential.helper /usr/local/bin/coderxp-git-credential
 
 # Custom banner on shell launch
 RUN echo 'echo -e "\x1b[1;34m=== CoderXP Linux Devbox (Ubuntu 24.04 / Node 24 / Python 3.12) ===\x1b[0m"' >> /root/.bashrc

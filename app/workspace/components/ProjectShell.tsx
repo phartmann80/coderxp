@@ -57,6 +57,7 @@ import { isPersistenceError, type PersistenceErrorCode } from "@/lib/workspace/t
 import { getEntryName } from "@/lib/workspace/path-utils";
 import { exportProjectZip } from "@/lib/workspace/export";
 import type { FileOpenRequest } from "@/app/workspace/hooks/useEditorPersistence";
+import { DevboxTimeline } from "./DevboxTimeline";
 
 interface ProjectShellProps {
   project: WorkspaceProject;
@@ -73,7 +74,7 @@ interface ProjectShellProps {
   onRefreshFiles: () => Promise<void>;
 }
 
-type RailView = "explorer" | "search" | "git" | "agent" | "run";
+type RailView = "explorer" | "search" | "git" | "agent" | "run" | "timeline";
 
 export function ProjectShell({
   project,
@@ -417,6 +418,17 @@ export function ProjectShell({
             <path d="M8 5.5v13l11-6.5-11-6.5z" />
           </svg>
         </button>
+        <button
+          title="Activity Timeline"
+          aria-label="Activity Timeline"
+          id="railTimeline"
+          className={activeRail === "timeline" ? "active" : ""}
+          onClick={() => setActiveRail("timeline")}
+        >
+          <svg viewBox="0 0 24 24">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
+        </button>
 
         <div className="spacer" />
 
@@ -596,6 +608,10 @@ export function ProjectShell({
               {activeRail === "run" && "Run and debug configurations."}
             </div>
           </div>
+        )}
+
+        {activeRail === "timeline" && (
+          <DevboxTimeline projectId={project.id} />
         )}
       </aside>
 

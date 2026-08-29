@@ -1,9 +1,6 @@
-import http from "node:http";
-import { execSync } from "node:child_process";
-
 function httpGet(path: string): Promise<any> {
   return new Promise((resolve, reject) => {
-    http.get(`http://127.0.0.1:3100${path}`, (res) => {
+    http.get(`http://127.0.0.1:3100${path}`, { agent: false }, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
@@ -24,10 +21,10 @@ function httpPost(path: string, body: any): Promise<any> {
       `http://127.0.0.1:3100${path}`,
       {
         method: "POST",
+        agent: false,
         headers: {
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(postData),
-          "Connection": "close",
         },
         timeout: 5000,
       },

@@ -290,10 +290,10 @@ class DevboxBroker extends EventEmitter {
   /**
    * Restores a Devbox from pending-purge.
    */
-  async restoreDevbox(projectId: string): Promise<{ ok: boolean; state: DevboxState }> {
+  async restoreDevbox(projectId: string): Promise<{ ok: boolean; status?: DevboxStatus }> {
     const session = this.sessions.get(projectId);
     if (!session || session.state !== "pending-purge") {
-      return { ok: false, state: session?.state || "destroyed" };
+      return { ok: false };
     }
 
     session.state = "stopped";
@@ -310,7 +310,7 @@ class DevboxBroker extends EventEmitter {
       },
     });
 
-    return { ok: true, state: "stopped" };
+    return { ok: true, status: this.getStatus(projectId) };
   }
 
   /**

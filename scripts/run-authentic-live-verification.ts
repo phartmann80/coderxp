@@ -1,3 +1,6 @@
+import http from "node:http";
+import { execSync } from "node:child_process";
+
 function httpGet(path: string): Promise<any> {
   return new Promise((resolve, reject) => {
     http.get(`http://127.0.0.1:3100${path}`, { agent: false }, (res) => {

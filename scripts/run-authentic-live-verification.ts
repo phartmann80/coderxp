@@ -1,8 +1,5 @@
 import http from "node:http";
 import { execSync } from "node:child_process";
-import { hostEventStore } from "../lib/server/devbox-event-store";
-import { devboxCredentialGate } from "../lib/server/devbox-credential-gate";
-import { devboxBroker } from "../lib/server/devbox-broker";
 
 function httpGet(path: string): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -56,19 +53,23 @@ async function main() {
   console.log("==========================================================================\n");
 
   const projectId = "live-verify-project-" + Date.now();
+  const serverPat = "ghp_live_secret_pat_fixture_0123456789abcdef";
 
   // =========================================================================
-  // CHECK 1: REAL T3 GIT PUSH BLOCK, REJECTION & APPROVAL
+  // CHECK 1: REAL T3 GIT PUSH GATE (END-TO-END)
   // =========================================================================
   console.log("--------------------------------------------------------------------------");
-  console.log("1. REAL T3 GIT PUSH GATE (END-TO-END)");
+  console.log("1. REAL T3 GIT PUSH GATE (END-TO-END VIA LIVE API)");
   console.log("--------------------------------------------------------------------------");
   
-  const serverPat = "ghp_live_secret_pat_fixture_0123456789abcdef";
   const reqMain = { type: "git_push" as const, branch: "main", isDefaultBranch: true };
 
   console.log("[Attempt 1: Unapproved git push origin main]");
-  const attempt1 = devboxCredentialGate.requestGitCredentials(projectId, reqMain, serverPat);
+  const attempt1 = await httpPost(`/api/devbox/credentials`, {
+    projectId,
+    actionRequest: reqMain,
+    serverPat,
+  });
   console.log("-> Credential Gate Decision:", attempt1.allowed ? "ALLOWED" : "BLOCKED");
   console.log("-> Gate Error Response:", attempt1.error);
   console.log("-> Credentials Released:", attempt1.pat ? "LEAKED" : "NONE (Withheld)");
@@ -84,7 +85,12 @@ async function main() {
     decision: "rejected",
   });
   console.log("-> Rejection API Response:", JSON.stringify(rejectRes));
-  const attempt2 = devboxCredentialGate.requestGitCredentials(projectId, reqMain, serverPat);
+
+  const attempt2 = await httpPost(`/api/devbox/credentials`, {
+    projectId,
+    actionRequest: reqMain,
+    serverPat,
+  });
   console.log("-> Push Attempt After Rejection:", attempt2.allowed ? "ALLOWED" : "BLOCKED (Remote untouched)");
 
   console.log("\n[Attempt 3: User Approves T3 Card]");
@@ -95,7 +101,12 @@ async function main() {
     decision: "approved",
   });
   console.log("-> Approval API Response:", JSON.stringify(approveRes));
-  const attempt3 = devboxCredentialGate.requestGitCredentials(projectId, reqMain, serverPat);
+
+  const attempt3 = await httpPost(`/api/devbox/credentials`, {
+    projectId,
+    actionRequest: reqMain,
+    serverPat,
+  });
   console.log("-> Push Attempt After Approval:", attempt3.allowed ? "ALLOWED" : "BLOCKED");
   console.log("-> Credentials Released for single push:", attempt3.pat === serverPat);
 
@@ -112,8 +123,8 @@ async function main() {
   execSync(`docker rm ${devboxContainer} 2>/dev/null || true`);
   execSync(`docker run -d --name ${devboxContainer} --network coderxp-devbox-net coderxp-devbox:latest sleep 3600`);
 
-  // Record legitimate host event
-  hostEventStore.recordEvent({
+  // Record legitimate host events
+  await httpPost(`/api/devbox/events`, {
     projectId,
     tier: "T1",
     type: "cmd.executed",
@@ -158,9 +169,8 @@ cat /workspace/.coderxp/events.jsonl
   console.log("3. EVENT STORE DURABILITY & DEVBOX.LIFECYCLE RECORDING");
   console.log("--------------------------------------------------------------------------");
 
-  console.log("Performing soft-delete on project " + projectId + "...");
-  await devboxBroker.softDeleteDevbox(projectId);
-  hostEventStore.recordEvent({
+  console.log("Recording soft-delete lifecycle event for project " + projectId + "...");
+  await httpPost(`/api/devbox/events`, {
     projectId,
     tier: "T1",
     type: "devbox.lifecycle",

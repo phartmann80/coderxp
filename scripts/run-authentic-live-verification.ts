@@ -27,7 +27,9 @@ function httpPost(path: string, body: any): Promise<any> {
         headers: {
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(postData),
+          "Connection": "close",
         },
+        timeout: 5000,
       },
       (res) => {
         let data = "";
@@ -41,6 +43,9 @@ function httpPost(path: string, body: any): Promise<any> {
         });
       }
     );
+    req.on("timeout", () => {
+      req.destroy(new Error("Request timed out"));
+    });
     req.on("error", reject);
     req.write(postData);
     req.end();

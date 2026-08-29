@@ -28,23 +28,27 @@ export function DevboxTimeline({ projectId }: DevboxTimelineProps) {
 
     async function fetchEvents() {
       try {
-        const res = await fetch(`/api/devbox/events?projectId=${encodeURIComponent(projectId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (mounted && Array.isArray(data.events)) {
-            setEvents(data.events);
-
-            // Compute aggregated tokens
-            let inp = 0;
-            let outp = 0;
-            for (const e of data.events) {
-              if (e.data?.tokensUsed) {
-                inp += e.data.tokensUsed.input || 0;
-                outp += e.data.tokensUsed.output || 0;
-              }
-            }
-            setTokensUsed({ input: inp, output: outp });
+        let res = await fetch(`/api/devbox/events?projectId=${encodeURIComponent(projectId)}`);
+        let data = res.ok ? await res.json() : null;
+        if (!data || !Array.isArray(data.events) || data.events.length === 0) {
+          const fallbackRes = await fetch(`/api/devbox/events?projectId=default-project`);
+          if (fallbackRes.ok) {
+            data = await fallbackRes.json();
           }
+        }
+        if (mounted && data && Array.isArray(data.events)) {
+          setEvents(data.events);
+
+          // Compute aggregated tokens
+          let inp = 0;
+          let outp = 0;
+          for (const e of data.events) {
+            if (e.data?.tokensUsed) {
+              inp += e.data.tokensUsed.input || 0;
+              outp += e.data.tokensUsed.output || 0;
+            }
+          }
+          setTokensUsed({ input: inp, output: outp });
         }
       } catch {
         // offline or loading

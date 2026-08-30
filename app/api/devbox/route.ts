@@ -70,17 +70,30 @@ export async function GET(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const url = new URL(req.url);
-    const projectId = url.searchParams.get("projectId") || "default-project";
-    const isPermanent = url.searchParams.get("permanent") === "true";
+    let projectId = url.searchParams.get("projectId");
+    let isPermanent = url.searchParams.get("permanent") === "true";
+
+    if (!projectId) {
+      const body = (await req.json().catch(() => ({}))) as {
+        projectId?: string;
+        permanent?: boolean;
+      };
+      projectId = body.projectId;
+      if (body.permanent !== undefined) {
+        isPermanent = Boolean(body.permanent);
+      }
+    }
+
+    const effectiveProjectId = projectId || "default-project";
 
     if (isPermanent) {
       // Step 2: Permanent Purge
-      const res = await devboxBroker.permanentDeleteDevbox(projectId);
+      const res = await devboxBroker.permanentDeleteDevbox(effectiveProjectId);
       return NextResponse.json({ ok: true, permanent: true, purged: res.purged });
     }
 
     // Step 1: Soft Delete with 7-Day Grace Period
-    const res = await devboxBroker.softDeleteDevbox(projectId);
+    const res = await devboxBroker.softDeleteDevbox(effectiveProjectId);
     return NextResponse.json({ ok: true, permanent: false, purgeAt: res.purgeAt });
   } catch (err: any) {
     return NextResponse.json(

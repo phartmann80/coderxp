@@ -70,7 +70,7 @@ export async function GET(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const url = new URL(req.url);
-    let projectId = url.searchParams.get("projectId");
+    let projectId: string | null | undefined = url.searchParams.get("projectId");
     let isPermanent = url.searchParams.get("permanent") === "true";
 
     if (!projectId) {

@@ -35,7 +35,7 @@ class MockTransport implements AgentTransport {
       sequence: 3,
       requestId: request.requestId,
       turnId: request.turnId,
-      stopReason: "end_turn",
+      stopReason: "stop",
     };
   }
 }
@@ -127,7 +127,8 @@ async function runTests() {
   // Wait for mock transport dispatch and run completion
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.strictEqual(transport.dispatchedRequests.length, 1, "Transport must receive exactly 1 request");
-  assert.strictEqual(transport.dispatchedRequests[0].messages[1].parts[0].text, "hi", "User prompt must be present in request");
+  const firstPart = transport.dispatchedRequests[0].messages[1].parts[0];
+  assert.strictEqual((firstPart as any).text, "hi", "User prompt must be present in request");
   console.log("[PASS] Prompt successfully submitted and dispatched upstream.");
 
   console.log("\n--- 3. Generation bump recreation test ---");

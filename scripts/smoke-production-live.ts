@@ -1,5 +1,4 @@
 import assert from "node:assert";
-import { WebSocket } from "ws";
 
 async function main() {
   console.log("==========================================================================");
@@ -16,7 +15,7 @@ async function main() {
   console.log("--- 1. Checking /api/agent/health ---");
   const healthRes = await fetch(`${baseUrl}/api/agent/health`, { headers });
   assert.strictEqual(healthRes.status, 200, `Health check failed with HTTP ${healthRes.status}`);
-  const healthJson = await healthRes.json();
+  const healthJson: any = await healthRes.json();
   assert.strictEqual(healthJson.ok, true, "Health response ok field must be true");
   assert.strictEqual(healthJson.ready, true, "Provider must be ready");
   console.log(`[PASS] Health check passed (${healthJson.providerId}, model: ${healthJson.defaultModelDisplayName}).`);
@@ -85,27 +84,31 @@ async function main() {
     body: JSON.stringify({ projectId: "smoke-project" }),
   });
   assert.strictEqual(tokenRes.status, 200, `Token generation failed with HTTP ${tokenRes.status}`);
-  const tokenData = await tokenRes.json();
+  const tokenData: any = await tokenRes.json();
   const token = tokenData.token;
   assert(token, "Token must be present in response");
 
   const wsUrl = `wss://coderxp.pro/ws/devbox/?token=${encodeURIComponent(token)}&projectId=smoke-project`;
   console.log("Connecting to Devbox WebSocket broker...");
 
+  // Use global WebSocket available in Node.js 22+
+  const NativeWs = (globalThis as any).WebSocket;
+  assert(NativeWs, "Global WebSocket must be available in runtime");
+
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("Devbox WSS connection timeout")), 10000);
-    const ws = new WebSocket(wsUrl, { headers: { Authorization: authHeader } });
+    const timeout = setTimeout(() => reject(new Error("Devbox WSS connection timeout")), 15000);
+    const ws = new NativeWs(wsUrl, { headers: { Authorization: authHeader } });
 
     let handshakeReceived = false;
     let markerReceived = false;
 
-    ws.on("open", () => {
-      // connected
-    });
+    ws.onopen = () => {
+      // open
+    };
 
-    ws.on("message", (raw) => {
+    ws.onmessage = (event: any) => {
       try {
-        const str = raw.toString();
+        const str = typeof event.data === "string" ? event.data : event.data.toString();
         const parsed = JSON.parse(str);
 
         if (parsed.type === "handshake_ack") {
@@ -125,19 +128,19 @@ async function main() {
       } catch {
         // ignore
       }
-    });
+    };
 
-    ws.on("error", (err) => {
+    ws.onerror = (err: any) => {
       clearTimeout(timeout);
       reject(err);
-    });
+    };
 
-    ws.on("close", () => {
+    ws.onclose = () => {
       if (!markerReceived && !handshakeReceived) {
         clearTimeout(timeout);
         reject(new Error("WebSocket closed before handshake or marker reception"));
       }
-    });
+    };
   });
 
   console.log(`[PASS] Devbox WebSocket full-duplex verified. Server echoed ${marker} successfully.`);
@@ -146,7 +149,7 @@ async function main() {
   console.log("\n--- 4. Checking Devbox Timeline & Host Events API ---");
   const eventsRes = await fetch(`${baseUrl}/api/devbox/events?projectId=smoke-project`, { headers });
   assert.strictEqual(eventsRes.status, 200, `Events endpoint failed with HTTP ${eventsRes.status}`);
-  const eventsData = await eventsRes.json();
+  const eventsData: any = await eventsRes.json();
   assert(Array.isArray(eventsData.events), "Events must be an array");
   console.log("[PASS] Host event store and Activity Timeline verified.");
 

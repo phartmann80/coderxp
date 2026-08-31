@@ -63,8 +63,11 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-wss.on("connection", (ws: WebSocket, _req: http.IncomingMessage, projectId: string) => {
+wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId: string) => {
   const redactor = new StreamingRedactor();
+
+  // Ensure devbox session is initialized for this project
+  await devboxBroker.getOrCreateDevbox(projectId, "coderxpadmin");
 
   // 1. Send Authoritative Handshake Ack (Condition 2a)
   const ackPayload = JSON.stringify({
@@ -102,6 +105,7 @@ wss.on("connection", (ws: WebSocket, _req: http.IncomingMessage, projectId: stri
       const parsed = JSON.parse(str);
 
       if (parsed.type === "command") {
+        await devboxBroker.getOrCreateDevbox(projectId, "coderxpadmin");
         const res = await devboxBroker.executeCommand(
           projectId,
           parsed.command,

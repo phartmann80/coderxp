@@ -1,17 +1,5 @@
 import assert from "node:assert";
-
-// Robust WebSocket client resolver for Node.js test runner
-function getWebSocketConstructor(): any {
-  if (typeof (globalThis as any).WebSocket !== "undefined") {
-    return (globalThis as any).WebSocket;
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require("ws");
-  } catch {
-    throw new Error("No WebSocket client found in runtime environment.");
-  }
-}
+import WebSocket from "ws";
 
 async function main() {
   console.log("==========================================================================");
@@ -104,34 +92,26 @@ async function main() {
   const wsUrl = `wss://coderxp.pro/ws/devbox/?token=${encodeURIComponent(token)}&projectId=smoke-project`;
   console.log("Connecting to Devbox WebSocket broker...");
 
-  const WsClass = getWebSocketConstructor();
-  assert(WsClass, "WebSocket client class must be available");
-
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Devbox WSS connection timeout")), 15000);
-    const ws = new WsClass(wsUrl, { headers: { Authorization: authHeader } });
+    const ws = new WebSocket(wsUrl, { headers: { Authorization: authHeader } });
 
     let handshakeReceived = false;
     let markerReceived = false;
 
-    ws.onopen = () => {
+    ws.on("open", () => {
       // connected
-    };
+    });
 
-    // Standard ws/browser event listeners
-    const handleMsg = (raw: any) => {
+    ws.on("message", (raw: any) => {
       try {
-        const data = raw.data !== undefined ? raw.data : raw;
-        const str = typeof data === "string" ? data : data.toString();
+        const str = raw.toString();
         const parsed = JSON.parse(str);
 
         if (parsed.type === "handshake_ack") {
           handshakeReceived = true;
           // Send echo command with unique marker to verify stdin dispatch
-          const cmdPayload = JSON.stringify({ type: "command", command: "echo", args: [marker] });
-          if (typeof ws.send === "function") {
-            ws.send(cmdPayload);
-          }
+          ws.send(JSON.stringify({ type: "command", command: "echo", args: [marker] }));
         }
 
         if (parsed.type === "output" && typeof parsed.data === "string") {
@@ -145,33 +125,19 @@ async function main() {
       } catch {
         // ignore
       }
-    };
+    });
 
-    if (typeof ws.on === "function") {
-      ws.on("message", handleMsg);
-      ws.on("error", (err: any) => {
+    ws.on("error", (err: any) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+
+    ws.on("close", () => {
+      if (!markerReceived && !handshakeReceived) {
         clearTimeout(timeout);
-        reject(err);
-      });
-      ws.on("close", () => {
-        if (!markerReceived && !handshakeReceived) {
-          clearTimeout(timeout);
-          reject(new Error("WebSocket closed before handshake or marker reception"));
-        }
-      });
-    } else {
-      ws.onmessage = handleMsg;
-      ws.onerror = (err: any) => {
-        clearTimeout(timeout);
-        reject(err);
-      };
-      ws.onclose = () => {
-        if (!markerReceived && !handshakeReceived) {
-          clearTimeout(timeout);
-          reject(new Error("WebSocket closed before handshake or marker reception"));
-        }
-      };
-    }
+        reject(new Error("WebSocket closed before handshake or marker reception"));
+      }
+    });
   });
 
   console.log(`[PASS] Devbox WebSocket full-duplex verified. Server echoed ${marker} successfully.`);

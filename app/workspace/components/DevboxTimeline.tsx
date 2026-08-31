@@ -82,6 +82,25 @@ export function DevboxTimeline({ projectId }: DevboxTimelineProps) {
     }
   }
 
+  async function handleReject(branch: string) {
+    setActionLoading(true);
+    try {
+      await fetch(`/api/devbox/approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, branch, decision: "rejected" }),
+      });
+      // Refresh events
+      const res = await fetch(`/api/devbox/events?projectId=${encodeURIComponent(projectId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setEvents(data.events || []);
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   return (
     <div className="flex flex-col h-full bg-[var(--bg-side)] border-r border-[var(--border-soft)] text-xs font-sans text-[var(--text)]">
       {/* Header: Resource Metrics (§34) */}
@@ -141,6 +160,14 @@ export function DevboxTimeline({ projectId }: DevboxTimelineProps) {
               {/* T3 Approval Card (§33 / Amendment 4) */}
               {evt.type === "approval.requested" && (
                 <div className="mt-2 pt-2 border-t border-amber-800/30 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded bg-red-950 hover:bg-red-900 border border-red-800 text-red-200 text-[10px] cursor-pointer"
+                    disabled={actionLoading}
+                    onClick={() => handleReject(evt.data?.branch || "main")}
+                  >
+                    Reject
+                  </button>
                   <button
                     type="button"
                     className="px-2 py-1 rounded bg-amber-600 hover:bg-amber-500 text-black font-semibold text-[10px] cursor-pointer"

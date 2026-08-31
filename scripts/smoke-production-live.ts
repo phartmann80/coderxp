@@ -6,7 +6,7 @@ async function main() {
   console.log("==========================================================================\n");
 
   const baseUrl = process.env.LIVE_TARGET_URL || "https://coderxp.pro";
-  const authHeader = "Basic " + Buffer.from("coderxpadmin:coderxp-devbox-2026-auth").toString("base64");
+  const authHeader = "Basic " + Buffer.from("coderxpadmin:coderxp-pilot-auth-2026").toString("base64");
   const headers = { Authorization: authHeader, "Content-Type": "application/json" };
 
   console.log(`Target: ${baseUrl}\n`);

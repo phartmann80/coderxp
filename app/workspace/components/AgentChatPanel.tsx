@@ -737,11 +737,12 @@ export function AgentChatPanel({
                   return null;
                 })}
 
-                {/* If assistant message has empty text while pending */}
+                {/* Loud Error State if assistant message settled with 0 content blocks */}
                 {!isUser && msg.content.length === 0 && !isStreaming && (
-                  <span style={{ color: "var(--text-faint)", fontStyle: "italic" }}>
-                    (Empty response)
-                  </span>
+                  <div className="flex items-center gap-2 p-2 my-1 rounded border border-rose-800/40 bg-rose-950/20 text-rose-300 text-xs font-sans">
+                    <span>⚠</span>
+                    <span>Message failed to send — upstream returned no content. Please retry.</span>
+                  </div>
                 )}
               </div>
             </div>
@@ -902,21 +903,6 @@ export function AgentChatPanel({
                   ))}
                 </optgroup>
               ))}
-            </select>
-
-            {/* Compact permission mode dropdown */}
-            <select
-              className="mini-select"
-              aria-label="Permission mode"
-              title="Permission mode"
-              value={permissionMode}
-              onChange={(e) =>
-                onPermissionModeChange(e.target.value as AgentPermissionMode)
-              }
-            >
-              <option value="ask">Ask before actions</option>
-              <option value="auto-safe">Auto-run safe actions</option>
-              <option value="autonomous">Autonomous</option>
             </select>
 
             <span className="grow" />

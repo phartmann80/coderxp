@@ -261,6 +261,22 @@ export function useAgentChat(
             if (prev.length === 0) return prev;
             const last = prev[prev.length - 1];
             if (last.role !== "assistant") return prev;
+            if (last.content.length === 0) {
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...last,
+                  status: "error",
+                  content: [
+                    {
+                      id: `err-${Date.now()}`,
+                      kind: "error",
+                      message: "Message failed to send — upstream returned no content. Please retry.",
+                    },
+                  ],
+                },
+              ];
+            }
             return [
               ...prev.slice(0, -1),
               { ...last, status: "complete" },

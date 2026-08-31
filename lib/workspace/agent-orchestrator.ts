@@ -254,7 +254,7 @@ export class AgentOrchestrator {
     this.generation = options.generation;
     this.runtime = options.runtime;
     this.transport = options.transport ?? null;
-    this.systemContext = options.systemContext ?? "You are CoderXP Agent, an autonomous software development assistant.";
+    this.systemContext = options.systemContext ?? "You are CoderXP Agent, a tier-gated software development assistant.";
     this.onEventCb = options.onEvent;
 
     // Primitives

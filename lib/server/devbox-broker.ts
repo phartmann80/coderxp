@@ -143,7 +143,7 @@ class DevboxBroker extends EventEmitter {
   }
 
   /**
-   * Executes a command inside the Devbox with full autonomy & compensating controls.
+   * Executes a command inside the Devbox with 5-tier action policy & compensating controls.
    */
   async executeCommand(
     projectId: string,

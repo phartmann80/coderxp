@@ -6,10 +6,13 @@
  * Binds the pure iterative agent orchestrator to React components, the project
  * generation counter, the M3.7 execution runtime, and the streaming transport.
  *
- * ProjectShell remains the authoritative lifecycle owner.
+ * Structural Invariant:
+ * - Instance identity is strictly keyed by `projectId + generation`.
+ * - All component callbacks, runtimes, and transports are routed through mutable refs,
+ *   guaranteeing that component re-renders NEVER cause orchestrator recreation or disposal.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentOrchestrator,
   type OrchestrationBudgetOptions,
@@ -54,34 +57,60 @@ export function useAgentOrchestrator(
 
   const [revision, setRevision] = useState(0);
 
-  const orchestrator = useMemo(() => {
-    return new AgentOrchestrator({
+  // Store mutable options in refs to decouple from instance identity
+  const runtimeRef = useRef(runtime);
+  runtimeRef.current = runtime;
+  const transportRef = useRef(transport);
+  transportRef.current = transport;
+  const systemContextRef = useRef(systemContext);
+  systemContextRef.current = systemContext;
+  const budgetsRef = useRef(budgets);
+  budgetsRef.current = budgets;
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
+
+  // Key instance strictly by projectId + generation
+  const orchestratorRef = useRef<AgentOrchestrator | null>(null);
+  const keyRef = useRef<{ projectId: string; generation: number } | null>(null);
+
+  if (
+    !orchestratorRef.current ||
+    keyRef.current?.projectId !== projectId ||
+    keyRef.current?.generation !== generation
+  ) {
+    if (orchestratorRef.current) {
+      orchestratorRef.current.dispose();
+    }
+    keyRef.current = { projectId, generation };
+    orchestratorRef.current = new AgentOrchestrator({
       projectId,
       generation,
-      runtime,
-      transport,
-      systemContext,
-      budgets,
+      runtime: runtimeRef.current,
+      transport: transportRef.current,
+      systemContext: systemContextRef.current,
+      budgets: budgetsRef.current,
       onEvent: (event) => {
         setRevision((n) => n + 1);
-        onEvent?.(event);
+        onEventRef.current?.(event);
       },
     });
-  }, [projectId, generation, runtime, transport, systemContext, budgets, onEvent]);
+  }
 
-  // Sync generation changes to orchestrator
+  const orchestrator = orchestratorRef.current;
+
+  // Sync latest transport and runtime references into active instance
   useEffect(() => {
-    if (orchestrator.getGeneration() !== generation) {
-      orchestrator.invalidateGeneration(generation);
+    if (transport) {
+      orchestrator.setTransport(transport);
     }
-  }, [generation, orchestrator]);
+  }, [transport, orchestrator]);
 
-  // Dispose on unmount or runtime/project change
+  // Dispose strictly on unmount
   useEffect(() => {
     return () => {
-      orchestrator.dispose();
+      orchestratorRef.current?.dispose();
     };
-  }, [orchestrator]);
+  }, []);
 
   const submitRun = useCallback(
     (prompt: string) => {

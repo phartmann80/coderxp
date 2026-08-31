@@ -11,6 +11,7 @@ import type {
   AgentTransportEvent,
   AgentTransportRequest,
   CanonicalAgentMessage,
+  CanonicalPart,
 } from "../workspace/agent-transport-types";
 import {
   LOGICC_CHAT_COMPLETIONS_URL,
@@ -174,8 +175,53 @@ export function validateAndTranslateLogiccRequest(
   return { ok: true, body, model: approved.id };
 }
 
+function extractMessageParts(msg: any): CanonicalPart[] {
+  if (Array.isArray(msg.parts)) {
+    return msg.parts;
+  }
+  if (Array.isArray(msg.content)) {
+    return msg.content.map((b: any) => {
+      if (!b || typeof b !== "object") {
+        return { type: "text" as const, text: String(b || "") };
+      }
+      if (b.kind === "text" || b.type === "text") {
+        return { type: "text" as const, text: String(b.text || "") };
+      }
+      if (b.kind === "tool-call" || b.type === "tool-request") {
+        return {
+          type: "tool-request" as const,
+          toolCallId: String(b.id || b.toolCallId || ""),
+          name: String(b.name || b.toolName || ""),
+          args: b.args || b.arguments || {},
+        };
+      }
+      if (b.kind === "tool-result" || b.type === "tool-result") {
+        return {
+          type: "tool-result" as const,
+          envelope: b.envelope || {
+            toolCallId: String(b.toolCallId || ""),
+            toolName: String(b.toolName || ""),
+            attemptId: String(b.attemptId || ""),
+            status: b.status || "succeeded",
+            isError: Boolean(b.isError),
+            modelSafeResult: b.modelSafeResult || b.result || {},
+          },
+        };
+      }
+      return { type: "text" as const, text: String(b.text || JSON.stringify(b)) };
+    });
+  }
+  if (typeof msg.content === "string") {
+    return [{ type: "text" as const, text: msg.content }];
+  }
+  if (typeof msg.text === "string") {
+    return [{ type: "text" as const, text: msg.text }];
+  }
+  return [];
+}
+
 function translateMessages(
-  messages: CanonicalAgentMessage[],
+  messages: any[],
 ):
   | { ok: true; messages: OpenAIMessage[] }
   | ProviderTranslateResult & { ok: false } {
@@ -194,9 +240,11 @@ function translateMessages(
       };
     }
 
+    const parts = extractMessageParts(msg);
+
     if (msg.role === "system") {
       let text = "";
-      for (const part of msg.parts) {
+      for (const part of parts) {
         if (part.type === "system-context" || part.type === "text") {
           text += (text ? "\n\n" : "") + part.text;
         }
@@ -209,7 +257,7 @@ function translateMessages(
 
     if (msg.role === "user") {
       const texts: string[] = [];
-      for (const part of msg.parts) {
+      for (const part of parts) {
         if (part.type === "text") {
           texts.push(part.text);
         } else if (part.type === "system-context") {
@@ -232,7 +280,7 @@ function translateMessages(
     if (msg.role === "assistant") {
       const textParts: string[] = [];
       const toolCalls: OpenAIToolCall[] = [];
-      for (const part of msg.parts) {
+      for (const part of parts) {
         if (part.type === "text") {
           textParts.push(part.text);
         } else if (part.type === "tool-request") {

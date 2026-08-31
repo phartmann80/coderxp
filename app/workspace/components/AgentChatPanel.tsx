@@ -14,7 +14,7 @@
  * - Unified input bar containing textarea + toolbar + send button
  * - Paperclip multi-file attachment with chip strip
  * - Push-to-talk speech dictation with live transcription
- * - Model selector with Logicc & Langdock provider groups
+ * - Model selector with Logicc and BYOK provider groups
  * - Fixed layout preventing composer from escaping viewport
  */
 
@@ -41,12 +41,6 @@ import {
   type ByokProviderId,
   fetchServerByokRecords,
 } from "@/lib/workspace/byok-providers";
-
-export interface GrantedFolder {
-  path: string;
-  mode: "read" | "read/write";
-  handle?: FileSystemDirectoryHandle;
-}
 
 export interface AttachedFile {
   name: string;
@@ -224,8 +218,6 @@ export function AgentChatPanel({
 }: AgentChatPanelProps) {
   const [inputText, setInputText] = useState("");
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
-  const [grants, setGrants] = useState<GrantedFolder[]>([]);
-  const [accessBodyHidden, setAccessBodyHidden] = useState(false);
   const [isListening, setIsListening] = useState(false);
 
   // Command card execution state: cardId -> { status, output, running }
@@ -238,25 +230,13 @@ export function AgentChatPanel({
     Record<string, { approved?: boolean; denied?: boolean }>
   >({});
 
-  // Dynamic models from server
-  const [availableModels, setAvailableModels] = useState<{
-    logicc: Array<{ id: string; name: string }>;
-    langdock: Array<{ id: string; name: string }>;
-  }>({
-    logicc: [
-      { id: "azure/gpt-4o", name: "GPT-4o" },
-      { id: "azure/gpt-4o-mini", name: "GPT-4o mini" },
-      { id: "vertex/claude-sonnet-5", name: "Claude Sonnet" },
-      { id: "vertex/gemini-2.5-flash", name: "Gemini Flash" },
-    ],
-    langdock: [
-      { id: "langdock/gpt-4o", name: "GPT-4o" },
-      { id: "langdock/claude-sonnet", name: "Claude Sonnet" },
-      { id: "langdock/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-      { id: "langdock/mistral-large", name: "Mistral Large" },
-      { id: "langdock/deepseek-v3", name: "DeepSeek v3" },
-    ],
-  });
+  // Dynamic server-managed models from /api/agent/models
+  const [serverModels, setServerModels] = useState<Array<{ id: string; name: string }>>([
+    { id: "azure/gpt-4o", name: "GPT-4o" },
+    { id: "azure/gpt-4o-mini", name: "GPT-4o mini" },
+    { id: "vertex/claude-sonnet-5", name: "Claude Sonnet" },
+    { id: "vertex/gemini-2.5-flash", name: "Gemini Flash" },
+  ]);
 
   // Revision 2.3 Action Menu & Modals
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
@@ -312,20 +292,20 @@ export function AgentChatPanel({
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && Array.isArray(data.models) && data.models.length > 0) {
-          const logiccList = data.models.map((m: any) => ({
+          const list = data.models.map((m: any) => ({
             id: m.id,
             name: m.displayName || m.id,
           }));
-          setAvailableModels((prev) => ({
-            ...prev,
-            logicc: logiccList,
-          }));
+          setServerModels(list);
+          if (data.defaultModel && !selectedModel) {
+            onSelectModel?.(data.defaultModel);
+          }
         }
       })
       .catch(() => {
-        // graceful fallback to predefined list
+        // graceful fallback
       });
-  }, []);
+  }, [onSelectModel, selectedModel]);
 
   // Handle Send
   const handleSend = useCallback(async () => {
@@ -472,44 +452,6 @@ export function AgentChatPanel({
     }
   }, [isListening, inputText]);
 
-  // Local Computer Access (File System Access API)
-  const handleGrantFolder = useCallback(async () => {
-    if ("showDirectoryPicker" in window) {
-      try {
-        const handle = await (window as any).showDirectoryPicker({
-          mode: "readwrite",
-        });
-        const path = `~/${handle.name}`;
-        setGrants((prev) => [...prev, { path, mode: "read/write", handle }]);
-      } catch (err: any) {
-        if (err.name !== "AbortError") {
-          // Fallback demo grant
-          setGrants((prev) => [
-            ...prev,
-            { path: "~/Documents/designs", mode: "read" },
-          ]);
-        }
-      }
-    } else {
-      // Fallback demo grants for browsers without File System Access API
-      const demo = [
-        { path: "~/Documents/designs", mode: "read" as const },
-        { path: "~/Projects/static-assets", mode: "read/write" as const },
-        { path: "~/Pictures/mockups", mode: "read" as const },
-      ];
-      const next = demo[grants.length % demo.length];
-      setGrants((prev) => [...prev, next]);
-    }
-  }, [grants]);
-
-  const revokeGrant = useCallback((idx: number) => {
-    setGrants((prev) => prev.filter((_, i) => i !== idx));
-  }, []);
-
-  const revokeAllGrants = useCallback(() => {
-    setGrants([]);
-  }, []);
-
   // Run inline command card
   const handleRunCommandCard = useCallback(
     async (cardId: string, command: string) => {
@@ -543,17 +485,14 @@ export function AgentChatPanel({
         }
       }
 
-      // Built-in output simulation if no external command runner
-      setTimeout(() => {
-        setCmdCardState((prev) => ({
-          ...prev,
-          [cardId]: {
-            status: "completed · exit 0",
-            output: `✓ command completed\nsynced to workspace storage`,
-            ran: true,
-          },
-        }));
-      }, 700);
+      setCmdCardState((prev) => ({
+        ...prev,
+        [cardId]: {
+          status: "failed · no runner",
+          output: "Command runner not configured.",
+          ran: true,
+        },
+      }));
     },
     [onExecuteCommand]
   );
@@ -866,73 +805,6 @@ export function AgentChatPanel({
 
       {/* Composer Section — Fixed bottom, never leaves viewport */}
       <div className="composer">
-        {/* Local Computer Access Box */}
-        <div className="access-box" id="accessBox">
-          <div className="ab-head">
-            <svg viewBox="0 0 24 24">
-              <rect x="4" y="4" width="16" height="12" rx="1.5" />
-              <path d="M9 20h6M12 16v4" />
-            </svg>
-            Local computer access
-            <span style={{ flex: 1 }} />
-            <button
-              className="icon-btn"
-              title="Collapse/Expand access panel"
-              aria-label="Collapse access panel"
-              onClick={() => setAccessBodyHidden((prev) => !prev)}
-            >
-              <svg viewBox="0 0 24 24">
-                <path d={accessBodyHidden ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"} />
-              </svg>
-            </button>
-          </div>
-
-          {!accessBodyHidden && (
-            <div className="ab-body">
-              Grant the agent access to specific folders on this computer. Access
-              is per-folder, per-session, always revocable — the agent can never
-              reach anything you haven't granted.
-            </div>
-          )}
-
-          {grants.length > 0 && (
-            <div className="grant-chips" id="grantChips">
-              {grants.map((g, idx) => (
-                <span key={idx} className="grant-chip">
-                  <span>{g.path}</span>
-                  <span className="rw">{g.mode}</span>
-                  <span
-                    className="revoke"
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Revoke access"
-                    onClick={() => revokeGrant(idx)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        revokeGrant(idx);
-                      }
-                    }}
-                  >
-                    ×
-                  </span>
-                </span>
-              ))}
-            </div>
-          )}
-
-          <div className="ab-actions">
-            <button className="btn" onClick={handleGrantFolder}>
-              Grant folder access…
-            </button>
-            {grants.length > 0 && (
-              <button className="btn" onClick={revokeAllGrants}>
-                Revoke all
-              </button>
-            )}
-          </div>
-        </div>
-
         {/* Attachment Chips Strip */}
         {attachments.length > 0 && (
           <div className="attach-strip has" id="attachStrip">
@@ -1008,8 +880,8 @@ export function AgentChatPanel({
               onChange={(e) => onSelectModel?.(e.target.value)}
             >
               <optgroup label="Logicc">
-                {availableModels.logicc.length > 0 ? (
-                  availableModels.logicc.map((m) => (
+                {serverModels.length > 0 ? (
+                  serverModels.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.name}
                     </option>
@@ -1017,19 +889,6 @@ export function AgentChatPanel({
                 ) : (
                   <option disabled value="">
                     (Logicc unavailable)
-                  </option>
-                )}
-              </optgroup>
-              <optgroup label="Langdock">
-                {availableModels.langdock.length > 0 ? (
-                  availableModels.langdock.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))
-                ) : (
-                  <option disabled value="">
-                    (Langdock unavailable)
                   </option>
                 )}
               </optgroup>

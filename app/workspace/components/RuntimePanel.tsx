@@ -14,6 +14,7 @@
 
 import React, { useState, useCallback } from "react";
 import { TerminalPanel } from "./TerminalPanel";
+import { DevboxTerminalPanel } from "./DevboxTerminalPanel";
 import type { OutputLine } from "@/lib/workspace/runtime";
 
 export type BottomPanelTab = "problems" | "output" | "terminal" | "ports";
@@ -22,6 +23,8 @@ interface RuntimePanelProps {
   output: OutputLine[];
   previewUrl: string | null;
   activePort?: number | null;
+  projectId?: string;
+  useDevbox?: boolean;
   onOpenPreview?: () => void;
   onKillTerminal?: () => void;
   onNewTerminal?: () => void;
@@ -33,6 +36,8 @@ export function RuntimePanel({
   output,
   previewUrl,
   activePort = 3000,
+  projectId = "default-project",
+  useDevbox = true,
   onOpenPreview,
   onKillTerminal,
   onNewTerminal,
@@ -176,7 +181,11 @@ export function RuntimePanel({
         data-pane="terminal"
         style={{ height: "100%", overflow: "hidden" }}
       >
-        <TerminalPanel active={activeTab === "terminal"} />
+        {useDevbox ? (
+          <DevboxTerminalPanel projectId={projectId} active={activeTab === "terminal"} />
+        ) : (
+          <TerminalPanel active={activeTab === "terminal"} />
+        )}
       </div>
 
       {/* PORTS Pane */}

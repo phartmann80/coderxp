@@ -52,8 +52,8 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       providerId: body.providerId,
-      maskedKey: result.maskedKey,
-      discoveredModels: result.discoveredModels,
+      maskedKey: result.record?.maskedKey,
+      models: result.record?.models,
     });
   } catch {
     return NextResponse.json(

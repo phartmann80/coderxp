@@ -64,7 +64,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const event = hostEventStore.appendEvent(projectId, {
+    const event = hostEventStore.recordEvent({
       projectId,
       sessionId: body.sessionId || "default-session",
       tier: body.tier,

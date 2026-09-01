@@ -53,6 +53,6 @@ export async function GET(req: Request): Promise<Response> {
 
   return NextResponse.json({
     models: listed.models,
-    defaultModel: listed.defaultModel,
+    defaultModelId: listed.defaultModelId,
   });
 }

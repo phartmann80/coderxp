@@ -1,11 +1,6 @@
 /**
  * Devbox Lifecycle & Control API Route for CoderXP Revision 2.4.
- *
- * Implements Directive §2.4 & Amendments:
- * - Provisioning & Host Capacity Guard (Max 5 concurrent)
- * - Two-step deletion (soft delete with 7-day grace period, permanent purge)
- * - Audit logs & pre-push git snapshot retrieval
- * - Kill switches ("stop-agent", "freeze", "restore", "rollback")
+ * Gated by application-level session authentication.
  */
 
 import { NextResponse } from "next/server";
@@ -13,8 +8,17 @@ import { devboxBroker } from "@/lib/server/devbox-broker";
 import { getDevboxAuditLogs } from "@/lib/devbox/audit-logger";
 import { getProjectGitSnapshots, getLatestSnapshot } from "@/lib/devbox/git-snapshot";
 import type { UserPlanTier } from "@/lib/devbox/types";
+import { validateRequestAuth } from "@/lib/server/auth";
 
 export async function POST(req: Request) {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { ok: false, error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
   try {
     const body = (await req.json().catch(() => ({}))) as {
       projectId?: string;
@@ -23,7 +27,7 @@ export async function POST(req: Request) {
     };
 
     const projectId = body.projectId || "default-project";
-    const userId = body.userId || "default-user";
+    const userId = auth.userId || body.userId || "coderxpadmin";
     const tier = body.tier || "pro";
 
     const result = await devboxBroker.getOrCreateDevbox(projectId, userId, tier);
@@ -45,6 +49,14 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { ok: false, error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
   try {
     const url = new URL(req.url);
     const projectId = url.searchParams.get("projectId") || "default-project";
@@ -68,6 +80,14 @@ export async function GET(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { ok: false, error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
   try {
     const url = new URL(req.url);
     let projectId: string | null | undefined = url.searchParams.get("projectId");
@@ -104,6 +124,14 @@ export async function DELETE(req: Request) {
 }
 
 export async function PUT(req: Request) {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { ok: false, error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
   try {
     const body = (await req.json().catch(() => ({}))) as {
       projectId?: string;

@@ -3,14 +3,24 @@
  *
  * Implements Amendment 1:
  * - Issues short-lived (60s) single-use WSS tokens for authenticated workspace sessions.
+ * - Gated by application-level session authentication.
  */
 
 import { NextResponse } from "next/server";
 import { mintDevboxWssToken } from "@/lib/server/devbox-token";
 import { devboxMetering } from "@/lib/devbox/metering";
 import type { UserPlanTier } from "@/lib/devbox/types";
+import { validateRequestAuth } from "@/lib/server/auth";
 
 export async function POST(req: Request) {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { ok: false, error: "Authentication required to generate Devbox token." },
+      { status: 401 },
+    );
+  }
+
   try {
     const body = (await req.json().catch(() => ({}))) as {
       projectId?: string;
@@ -19,7 +29,7 @@ export async function POST(req: Request) {
     };
 
     const projectId = body.projectId || "default-project";
-    const userId = body.userId || "default-user";
+    const userId = auth.userId || body.userId || "coderxpadmin";
     const tier = body.tier || "pro";
 
     // 1. Verify tier entitlement & quota
@@ -40,9 +50,9 @@ export async function POST(req: Request) {
       expiresInSeconds: 60,
       wsUrl: `/ws/devbox/?token=${encodeURIComponent(token)}&projectId=${encodeURIComponent(projectId)}`,
     });
-  } catch (err: any) {
+  } catch {
     return NextResponse.json(
-      { ok: false, error: err.message || "Internal server error." },
+      { ok: false, error: "Internal server error." },
       { status: 500 },
     );
   }

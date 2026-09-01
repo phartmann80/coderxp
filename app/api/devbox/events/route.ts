@@ -1,14 +1,21 @@
 /**
  * Host Event Bus API Endpoint for CoderXP Phase A.
- *
- * Implements Roadmap §4 & Amendment 1:
- * - Read access to authoritative host event stream for timeline UI.
+ * Gated by application-level session authentication.
  */
 
 import { NextResponse } from "next/server";
 import { hostEventStore } from "@/lib/server/devbox-event-store";
+import { validateRequestAuth } from "@/lib/server/auth";
 
 export async function GET(req: Request) {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { ok: false, error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
   try {
     const url = new URL(req.url);
     const projectId = url.searchParams.get("projectId") || "default-project";
@@ -32,6 +39,14 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { ok: false, error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
   try {
     const body = (await req.json().catch(() => ({}))) as {
       projectId?: string;
@@ -43,12 +58,15 @@ export async function POST(req: Request) {
 
     const projectId = body.projectId || "default-project";
     if (!body.type || !body.tier) {
-      return NextResponse.json({ ok: false, error: "Missing event type or tier." }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Missing event type or tier." },
+        { status: 400 },
+      );
     }
 
-    const event = hostEventStore.recordEvent({
+    const event = hostEventStore.appendEvent(projectId, {
       projectId,
-      sessionId: body.sessionId,
+      sessionId: body.sessionId || "default-session",
       tier: body.tier,
       type: body.type,
       data: body.data || {},

@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import {
   createAgentStreamHandler,
   createConcurrencyGate,
@@ -6,6 +6,7 @@ import {
   MAX_GLOBAL_CONCURRENT_STREAMS,
 } from "@/lib/server/agent-stream-handler";
 import { getActiveProvider } from "@/lib/server/agent-provider-registry";
+import { validateRequestAuth } from "@/lib/server/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,5 +22,17 @@ const productionHandler = createAgentStreamHandler({
 });
 
 export async function POST(req: NextRequest): Promise<Response> {
+  // Application-level authentication gate
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      {
+        error: "Unauthorized. Valid session required to access streaming agent.",
+        errorCode: "UNAUTHORIZED",
+      },
+      { status: 401 },
+    );
+  }
+
   return productionHandler(req);
 }

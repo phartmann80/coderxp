@@ -1,11 +1,6 @@
 /**
  * BYOK Management API Route for CoderXP Revision 2.3.
- *
- * Implements Directive §10.3:
- * - Accepts API key once over HTTPS, validates with live models call
- * - Stores encrypted server-side in secrets store
- * - Returns ONLY maskedKey (…last4) and discovered models to the client
- * - The full key is never serialized or returned
+ * Gated by application-level session authentication.
  */
 
 import { NextResponse } from "next/server";
@@ -15,8 +10,17 @@ import {
   revokeServerByok,
 } from "@/lib/workspace/byok-server-store";
 import type { ByokProviderId } from "@/lib/workspace/byok-providers";
+import { validateRequestAuth } from "@/lib/server/auth";
 
 export async function POST(req: Request) {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { ok: false, error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
   try {
     const body = (await req.json()) as {
       providerId: ByokProviderId;
@@ -32,7 +36,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const userId = "default_user"; // Scoped per authenticated session/user
+    const userId = auth.userId || "coderxpadmin";
     const result = await saveServerByok(userId, body.providerId, body.apiKey, {
       baseUrl: body.baseUrl,
       mode: body.mode,
@@ -45,34 +49,46 @@ export async function POST(req: Request) {
       );
     }
 
-    // Return client record (contains maskedKey only)
-    return NextResponse.json({ ok: true, record: result.record });
-  } catch (err: any) {
+    return NextResponse.json({
+      ok: true,
+      providerId: body.providerId,
+      maskedKey: result.maskedKey,
+      discoveredModels: result.discoveredModels,
+    });
+  } catch {
     return NextResponse.json(
-      { ok: false, error: err.message || "Internal server error." },
+      { ok: false, error: "Internal server error during BYOK validation." },
       { status: 500 },
     );
   }
 }
 
-export async function GET() {
-  try {
-    const userId = "default_user";
-    const records = listServerByok(userId);
-    return NextResponse.json({ ok: true, records });
-  } catch (err: any) {
+export async function GET(req: Request) {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
     return NextResponse.json(
-      { ok: false, error: err.message || "Internal server error." },
-      { status: 500 },
+      { ok: false, error: "Authentication required." },
+      { status: 401 },
     );
   }
+
+  const userId = auth.userId || "coderxpadmin";
+  const records = listServerByok(userId);
+  return NextResponse.json({ ok: true, keys: records });
 }
 
 export async function DELETE(req: Request) {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { ok: false, error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
   try {
     const url = new URL(req.url);
-    const providerId = url.searchParams.get("providerId") as ByokProviderId | null;
-
+    const providerId = url.searchParams.get("providerId") as ByokProviderId;
     if (!providerId) {
       return NextResponse.json(
         { ok: false, error: "providerId query parameter is required." },
@@ -80,12 +96,12 @@ export async function DELETE(req: Request) {
       );
     }
 
-    const userId = "default_user";
-    const revoked = revokeServerByok(userId, providerId);
-    return NextResponse.json({ ok: true, revoked });
-  } catch (err: any) {
+    const userId = auth.userId || "coderxpadmin";
+    const ok = revokeServerByok(userId, providerId);
+    return NextResponse.json({ ok, revoked: providerId });
+  } catch {
     return NextResponse.json(
-      { ok: false, error: err.message || "Internal server error." },
+      { ok: false, error: "Failed to revoke key." },
       { status: 500 },
     );
   }

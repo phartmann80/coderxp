@@ -1,14 +1,21 @@
 /**
  * T3 Approval Decision Endpoint for CoderXP Phase A.
- *
- * Implements Roadmap §0 & Amendment 4:
- * - Grants single or session-scoped approvals for T3 operations (e.g. git push).
+ * Gated by application-level session authentication.
  */
 
 import { NextResponse } from "next/server";
 import { devboxCredentialGate } from "@/lib/server/devbox-credential-gate";
+import { validateRequestAuth } from "@/lib/server/auth";
 
 export async function POST(req: Request) {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { ok: false, error: "Authentication required." },
+      { status: 401 },
+    );
+  }
+
   try {
     const body = (await req.json().catch(() => ({}))) as {
       projectId?: string;

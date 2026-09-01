@@ -1,15 +1,24 @@
 import { NextResponse } from "next/server";
 import { getActiveProvider } from "@/lib/server/agent-provider-registry";
 import { isSameOriginRequest } from "@/lib/server/agent-same-origin";
+import { validateRequestAuth } from "@/lib/server/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * Sanitized administrator-approved model list only.
- * Never exposes credentials, upstream URLs, pricing, or raw discovery payloads.
+ * Gated by application-level session authentication.
  */
 export async function GET(req: Request): Promise<Response> {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { errorCode: "UNAUTHORIZED", error: "Authentication required to view models." },
+      { status: 401 },
+    );
+  }
+
   if (!isSameOriginRequest(req)) {
     return NextResponse.json(
       { errorCode: "ACCESS_RESTRICTED", message: "Cross-origin agent requests are not allowed." },
@@ -38,15 +47,12 @@ export async function GET(req: Request): Promise<Response> {
   if (!listed.ok) {
     return NextResponse.json(
       { errorCode: listed.errorCode, message: listed.message },
-      { status: listed.status },
+      { status: 503 },
     );
   }
 
   return NextResponse.json({
-    ok: true,
-    provider: health.provider === "anthropic-byok" ? "anthropic" : health.provider,
-    providerId: health.provider,
     models: listed.models,
-    defaultModelId: listed.defaultModelId,
+    defaultModel: listed.defaultModel,
   });
 }

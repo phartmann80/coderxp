@@ -1,15 +1,23 @@
 import { NextResponse } from "next/server";
 import { getActiveProvider } from "@/lib/server/agent-provider-registry";
 import { isSameOriginRequest } from "@/lib/server/agent-same-origin";
+import { validateRequestAuth } from "@/lib/server/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Safe agent health. Never exposes credentials, env names, upstream URLs,
- * full model lists, quota, or internal provider errors.
+ * Safe agent health. Gated by application-level session authentication.
  */
 export async function GET(req: Request): Promise<Response> {
+  const auth = validateRequestAuth(req);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { errorCode: "UNAUTHORIZED", error: "Authentication required to view agent health." },
+      { status: 401 },
+    );
+  }
+
   if (!isSameOriginRequest(req)) {
     return NextResponse.json(
       { errorCode: "ACCESS_RESTRICTED", message: "Cross-origin agent requests are not allowed." },

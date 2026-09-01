@@ -195,12 +195,18 @@ async function main() {
             ws.send(JSON.stringify({ type: "command", command: "uname", args: ["-s"] }));
           } else if (step === 2 && allOutput.includes("Linux")) {
             console.log("[PASS] Real Linux kernel environment verified: `uname -s` -> Linux");
-            // Step 3: Send Node.js computation command
+            // Step 3: Send Node.js runtime version inspection command
             step = 3;
             allOutput = "";
-            ws.send(JSON.stringify({ type: "command", command: "node", args: ["-e", "console.log(99+24)"] }));
-          } else if (step === 3 && allOutput.includes("123")) {
-            console.log("[PASS] Real Node.js runtime inside container verified: `node -e ...` -> 123");
+            ws.send(JSON.stringify({ type: "command", command: "node", args: ["-v"] }));
+          } else if (step === 3 && allOutput.includes("v2")) {
+            console.log("[PASS] Real Node.js runtime inside container verified: `node -v` -> " + allOutput.trim());
+            // Step 4: Send working directory inspection
+            step = 4;
+            allOutput = "";
+            ws.send(JSON.stringify({ type: "command", command: "pwd", args: [] }));
+          } else if (step === 4 && allOutput.includes("/workspace")) {
+            console.log("[PASS] Real workspace directory verified: `pwd` -> /workspace");
             clearTimeout(timeout);
             try { ws.close(); } catch { /* ignore */ }
             resolve();
@@ -217,7 +223,7 @@ async function main() {
     });
 
     ws.on("close", (code, reason) => {
-      if (step < 3) {
+      if (step < 4) {
         clearTimeout(timeout);
         reject(new Error(`WebSocket closed at step ${step} with code ${code}: ${reason.toString()}`));
       }

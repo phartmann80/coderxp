@@ -11,15 +11,7 @@ import { validateRequestAuth } from "@/lib/server/auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const productionHandler = createAgentStreamHandler({
-  fetchUpstream: fetch,
-  clock: () => Date.now(),
-  scheduleTimeout: (fn, ms) => setTimeout(fn, ms),
-  cancelTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
-  limits: defaultStreamLimits,
-  concurrency: createConcurrencyGate(MAX_GLOBAL_CONCURRENT_STREAMS),
-  provider: getActiveProvider(),
-});
+const globalConcurrencyGate = createConcurrencyGate(MAX_GLOBAL_CONCURRENT_STREAMS);
 
 export async function POST(req: NextRequest): Promise<Response> {
   // Application-level authentication gate
@@ -34,5 +26,15 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
-  return productionHandler(req);
+  const handler = createAgentStreamHandler({
+    fetchUpstream: fetch,
+    clock: () => Date.now(),
+    scheduleTimeout: (fn, ms) => setTimeout(fn, ms),
+    cancelTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
+    limits: defaultStreamLimits,
+    concurrency: globalConcurrencyGate,
+    provider: getActiveProvider(),
+  });
+
+  return handler(req);
 }

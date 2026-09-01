@@ -28,19 +28,11 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const inputBufferRef = useRef<string>("");
-  const historyRef = useRef<string[]>([]);
-  const historyIdxRef = useRef<number>(-1);
   const lastActivityRef = useRef<number>(Date.now());
   const livenessTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [connState, setConnState] = useState<ConnectionState>("connecting");
   const [error, setError] = useState<string | null>(null);
-
-  const writePrompt = useCallback((term: Terminal) => {
-    term.write("\r\n\x1b[1;32mdeveloper@coderxp-devbox\x1b[0m:\x1b[1;34m/workspace\x1b[0m$ ");
-    inputBufferRef.current = "";
-  }, []);
 
   const connectDevbox = useCallback(async (isReconnect = false) => {
     if (isReconnect) {
@@ -86,7 +78,6 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
 
       ws.onopen = () => {
         lastActivityRef.current = Date.now();
-        // Do NOT render green banner here — wait for authoritative server handshake_ack (Condition 2a)
       };
 
       ws.onmessage = (event) => {
@@ -100,15 +91,17 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
           // Authoritative Handshake Ack (Condition 2a)
           if (parsed.type === "handshake_ack") {
             setConnState("connected");
-            term.writeln("\r\n\x1b[1;32m✓ Connected to CoderXP Devbox Runtime (Ubuntu 24.04 LTS)\x1b[0m");
-            term.writeln("\x1b[2m  Tier Security Policy & Append-Only Audit Logging Active\x1b[0m");
-            writePrompt(term);
+            term.writeln("\r\n\x1b[1;32m✓ Connected to CoderXP Devbox PTY (Ubuntu 24.04 LTS)\x1b[0m");
+            term.writeln("\x1b[2m  Cascadia Mono · Real TTY Session Active\x1b[0m\r\n");
+            // Send initial dimensions to PTY
+            ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
             return;
           }
 
           if (parsed.type === "output" && typeof parsed.data === "string") {
             term.write(parsed.data);
-            writePrompt(term);
+          } else if (parsed.type === "error" && typeof parsed.error === "string") {
+            term.writeln(`\r\n\x1b[1;31m[Devbox Error: ${parsed.error}]\x1b[0m\r\n`);
           } else if (parsed.type === "pong") {
             // Heartbeat acknowledged
           } else if (typeof parsed === "string") {
@@ -139,7 +132,7 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
         term.writeln(`\r\n\x1b[1;31mTerminal Error: ${err?.message || "Devbox unavailable"}\x1b[0m`);
       }
     }
-  }, [projectId, writePrompt]);
+  }, [projectId]);
 
   // Setup Liveness Watchdog (Condition 2a)
   useEffect(() => {
@@ -176,8 +169,11 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
       cols: 80,
       rows: 24,
       cursorBlink: true,
-      fontSize: 13,
-      fontFamily: "var(--font-jetbrains), 'JetBrains Mono', monospace",
+      fontSize: 14,
+      lineHeight: 1.2,
+      fontWeight: "400" as any,
+      fontWeightBold: "700" as any,
+      fontFamily: '"Cascadia Mono", "Cascadia Code", monospace',
       theme: {
         background: "#0a0b0d",
         foreground: "#d4d4d4",
@@ -206,80 +202,44 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
     termRef.current = term;
     fitRef.current = fitAddon;
 
-    term.writeln("\x1b[1;36mCoderXP Agent Devbox Terminal\x1b[0m");
-    term.writeln("\x1b[2mAuthenticating session with PTY broker…\x1b[0m");
+    // Ensure metrics align after custom font loads
+    if (typeof document !== "undefined" && document.fonts) {
+      document.fonts.ready.then(() => {
+        try {
+          fitAddon.fit();
+          term.refresh(0, term.rows - 1);
+        } catch {
+          // ignore
+        }
+      });
+    }
 
-    // Key Handler for interactive shell (Conditions 2b-2c)
-    term.onKey(({ key, domEvent }) => {
+    term.writeln("\x1b[1;36mCoderXP Devbox Interactive Terminal\x1b[0m");
+    term.writeln("\x1b[2mAuthenticating PTY session with broker…\x1b[0m");
+
+    // Real PTY onData stream: forward all raw bytes/keystrokes to Docker bash
+    term.onData((data) => {
       const ws = wsRef.current;
       const isConnected = ws && ws.readyState === WebSocket.OPEN;
 
-      // Condition 2c: Non-silent input guard during disconnect
       if (!isConnected) {
-        if (domEvent.key === "Enter") {
-          term.writeln("\r\n\x1b[1;31m[Terminal disconnected — keystrokes not sent. Reconnecting…]\x1b[0m");
-          connectDevbox(true);
-        }
+        term.writeln("\r\n\x1b[1;31m[Terminal disconnected — keystrokes not sent. Reconnecting…]\x1b[0m");
+        connectDevbox(true);
         return;
       }
 
-      const ev = domEvent;
-      if (ev.key === "Enter") {
-        const cmd = inputBufferRef.current.trim();
-        term.writeln("");
-        if (cmd) {
-          historyRef.current.push(cmd);
-          historyIdxRef.current = historyRef.current.length;
+      ws.send(data);
+    });
 
-          // Dispatch command to host PTY broker
-          const parts = cmd.split(" ");
-          const command = parts[0];
-          const args = parts.slice(1);
-          ws.send(JSON.stringify({ type: "command", command, args, raw: cmd }));
-        } else {
-          writePrompt(term);
+    // Wire terminal resize events to PTY broker
+    term.onResize(({ cols, rows }) => {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: "resize", cols, rows }));
+        } catch {
+          // ignore
         }
-        inputBufferRef.current = "";
-      } else if (ev.key === "Backspace") {
-        if (inputBufferRef.current.length > 0) {
-          inputBufferRef.current = inputBufferRef.current.slice(0, -1);
-          term.write("\b \b");
-        }
-      } else if (ev.key === "ArrowUp") {
-        if (historyRef.current.length > 0 && historyIdxRef.current > 0) {
-          historyIdxRef.current -= 1;
-          const prevCmd = historyRef.current[historyIdxRef.current];
-          while (inputBufferRef.current.length > 0) {
-            term.write("\b \b");
-            inputBufferRef.current = inputBufferRef.current.slice(0, -1);
-          }
-          inputBufferRef.current = prevCmd;
-          term.write(prevCmd);
-        }
-      } else if (ev.key === "ArrowDown") {
-        if (historyRef.current.length > 0 && historyIdxRef.current < historyRef.current.length - 1) {
-          historyIdxRef.current += 1;
-          const nextCmd = historyRef.current[historyIdxRef.current];
-          while (inputBufferRef.current.length > 0) {
-            term.write("\b \b");
-            inputBufferRef.current = inputBufferRef.current.slice(0, -1);
-          }
-          inputBufferRef.current = nextCmd;
-          term.write(nextCmd);
-        } else if (historyIdxRef.current === historyRef.current.length - 1) {
-          historyIdxRef.current = historyRef.current.length;
-          while (inputBufferRef.current.length > 0) {
-            term.write("\b \b");
-            inputBufferRef.current = inputBufferRef.current.slice(0, -1);
-          }
-        }
-      } else if (ev.key === "c" && ev.ctrlKey) {
-        term.writeln("^C");
-        inputBufferRef.current = "";
-        writePrompt(term);
-      } else if (!ev.altKey && !ev.ctrlKey && !ev.metaKey && key.length === 1) {
-        inputBufferRef.current += key;
-        term.write(key);
       }
     });
 
@@ -302,7 +262,7 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
       }
       term.dispose();
     };
-  }, [projectId, connectDevbox, writePrompt]);
+  }, [projectId, connectDevbox]);
 
   return (
     <div className="relative w-full h-full flex flex-col bg-[#0a0b0d] overflow-hidden">

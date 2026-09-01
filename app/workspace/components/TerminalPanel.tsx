@@ -54,8 +54,11 @@ export function TerminalPanel({ active }: TerminalPanelProps) {
       cols: 80,
       rows: 24,
       cursorBlink: true,
-      fontSize: 13,
-      fontFamily: "var(--font-jetbrains), 'JetBrains Mono', monospace",
+      fontSize: 14,
+      lineHeight: 1.2,
+      fontWeight: "400" as any,
+      fontWeightBold: "700" as any,
+      fontFamily: '"Cascadia Mono", "Cascadia Code", monospace',
       theme: {
         background: "#0a0b0d",
         foreground: "#d4d4d4",
@@ -91,6 +94,18 @@ export function TerminalPanel({ active }: TerminalPanelProps) {
 
     termRef.current = term;
     fitRef.current = fitAddon;
+
+    // Ensure metrics align after custom font loads
+    if (typeof document !== "undefined" && document.fonts) {
+      document.fonts.ready.then(() => {
+        try {
+          fitAddon.fit();
+          term.refresh(0, term.rows - 1);
+        } catch {
+          // ignore
+        }
+      });
+    }
 
     // Get the terminal manager singleton.
     const terminal = getTerminal();

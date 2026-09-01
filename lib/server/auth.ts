@@ -110,6 +110,54 @@ export function verifySessionToken(token: string): {
 }
 
 /**
+ * Hashes a plaintext password using PBKDF2 with SHA-512 and 100,000 iterations.
+ */
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const iterations = 100000;
+  const hash = crypto.pbkdf2Sync(password, salt, iterations, 64, "sha512").toString("hex");
+  return `pbkdf2$${iterations}$${salt}$${hash}`;
+}
+
+/**
+ * Verifies a password against a stored plaintext password or PBKDF2 hash.
+ */
+export function verifyPassword(passwordAttempt: string, stored: string): boolean {
+  if (!passwordAttempt || !stored) return false;
+
+  if (stored.startsWith("pbkdf2$")) {
+    const parts = stored.split("$");
+    if (parts.length !== 4) return false;
+    const iterations = parseInt(parts[1], 10);
+    const salt = parts[2];
+    const expectedHash = parts[3];
+    const derived = crypto.pbkdf2Sync(passwordAttempt, salt, iterations, 64, "sha512").toString("hex");
+    const derivedBuf = Buffer.from(derived, "hex");
+    const expectedBuf = Buffer.from(expectedHash, "hex");
+    if (derivedBuf.length !== expectedBuf.length) return false;
+    return crypto.timingSafeEqual(derivedBuf, expectedBuf);
+  }
+
+  // Plaintext constant-time fallback
+  const attemptBuf = Buffer.from(passwordAttempt);
+  const storedBuf = Buffer.from(stored);
+  if (attemptBuf.length !== storedBuf.length) {
+    crypto.timingSafeEqual(attemptBuf, attemptBuf);
+    return false;
+  }
+  return crypto.timingSafeEqual(attemptBuf, storedBuf);
+}
+
+/**
+ * Updates the in-memory runtime admin password hash.
+ */
+export function updateAdminPassword(newPasswordPlaintext: string): string {
+  const newHash = hashPassword(newPasswordPlaintext);
+  ADMIN_CONFIG.password = newHash;
+  return newHash;
+}
+
+/**
  * Constant-time credential verification for Paul / Admin account.
  */
 export function verifyAdminCredentials(
@@ -126,17 +174,7 @@ export function verifyAdminCredentials(
 
   if (!validId) return false;
 
-  const expectedPass = ADMIN_CONFIG.password;
-  const attemptBuffer = Buffer.from(passwordAttempt);
-  const expectedBuffer = Buffer.from(expectedPass);
-
-  if (attemptBuffer.length !== expectedBuffer.length) {
-    // Constant time dummy comparison to mitigate timing attacks
-    crypto.timingSafeEqual(attemptBuffer, attemptBuffer);
-    return false;
-  }
-
-  return crypto.timingSafeEqual(attemptBuffer, expectedBuffer);
+  return verifyPassword(passwordAttempt, ADMIN_CONFIG.password);
 }
 
 /**

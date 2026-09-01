@@ -66,6 +66,15 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
+// Optional node-pty loading with graceful fallback
+let ptyModule: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  ptyModule = require("node-pty");
+} catch {
+  // node-pty fallback for environments without C++ build tools
+}
+
 wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId: string) => {
   const redactor = new StreamingRedactor();
   const containerName = `coderxp-devbox-${projectId}`;
@@ -86,16 +95,76 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
     return;
   }
 
-  // 2. Spawn real interactive shell inside the Docker Devbox container
-  let ptyProcess: ChildProcess | null = null;
+  // 2. Spawn real interactive shell inside the Docker Devbox container (using node-pty if available)
+  let ptyProcess: any = null;
+  let childProcess: ChildProcess | null = null;
+
   try {
-    ptyProcess = spawn("docker", ["exec", "-i", containerName, "/bin/bash", "-l"], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        TERM: "xterm-256color",
-      },
-    });
+    if (ptyModule) {
+      ptyProcess = ptyModule.spawn("docker", ["exec", "-it", containerName, "/bin/bash", "-l"], {
+        name: "xterm-256color",
+        cols: 120,
+        rows: 30,
+        cwd: "/root",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color",
+        },
+      });
+
+      ptyProcess.onData((data: string) => {
+        const sanitized = redactor.processChunk(data);
+        if (ws.readyState === WebSocket.OPEN && sanitized) {
+          ws.send(JSON.stringify({ type: "output", data: sanitized }));
+        }
+      });
+
+      ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: "output",
+              data: `\r\n[Devbox session disconnected (exit code ${exitCode})]\r\n`,
+            }),
+          );
+        }
+      });
+    } else {
+      childProcess = spawn("docker", ["exec", "-i", containerName, "/bin/bash", "-l"], {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          TERM: "xterm-256color",
+        },
+      });
+
+      childProcess.stdout?.on("data", (chunk: Buffer) => {
+        const raw = chunk.toString("utf8");
+        const sanitized = redactor.processChunk(raw);
+        if (ws.readyState === WebSocket.OPEN && sanitized) {
+          ws.send(JSON.stringify({ type: "output", data: sanitized }));
+        }
+      });
+
+      childProcess.stderr?.on("data", (chunk: Buffer) => {
+        const raw = chunk.toString("utf8");
+        const sanitized = redactor.processChunk(raw);
+        if (ws.readyState === WebSocket.OPEN && sanitized) {
+          ws.send(JSON.stringify({ type: "output", data: sanitized }));
+        }
+      });
+
+      childProcess.on("close", (code) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: "output",
+              data: `\r\n[Devbox session disconnected (exit code ${code})]\r\n`,
+            }),
+          );
+        }
+      });
+    }
   } catch (err: any) {
     ws.send(
       JSON.stringify({
@@ -116,44 +185,14 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
   });
   ws.send(ackPayload);
 
-  // 4. Pipe PTY stdout and stderr to WebSocket with real-time redaction
-  ptyProcess.stdout?.on("data", (chunk: Buffer) => {
-    const raw = chunk.toString("utf8");
-    const sanitized = redactor.processChunk(raw);
-    if (ws.readyState === WebSocket.OPEN && sanitized) {
-      ws.send(JSON.stringify({ type: "output", data: sanitized }));
+  // 4. Stdin Writer Helper
+  const writeToStdin = (content: string) => {
+    if (ptyProcess && typeof ptyProcess.write === "function") {
+      ptyProcess.write(content);
+    } else if (childProcess?.stdin && !childProcess.stdin.destroyed) {
+      childProcess.stdin.write(content);
     }
-  });
-
-  ptyProcess.stderr?.on("data", (chunk: Buffer) => {
-    const raw = chunk.toString("utf8");
-    const sanitized = redactor.processChunk(raw);
-    if (ws.readyState === WebSocket.OPEN && sanitized) {
-      ws.send(JSON.stringify({ type: "output", data: sanitized }));
-    }
-  });
-
-  ptyProcess.on("error", (err) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(
-        JSON.stringify({
-          type: "error",
-          error: `Devbox execution error: ${err.message}`,
-        }),
-      );
-    }
-  });
-
-  ptyProcess.on("close", (code) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(
-        JSON.stringify({
-          type: "output",
-          data: `\r\n[Devbox session disconnected (exit code ${code})]\r\n`,
-        }),
-      );
-    }
-  });
+  };
 
   // 5. 15-Second Server-Side Heartbeat Keepalive Loop
   let isAlive = true;
@@ -183,11 +222,11 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
         const parsed = JSON.parse(str);
         if (parsed.type === "command") {
           const cmd = `${parsed.command} ${(parsed.args || []).join(" ")}\n`;
-          ptyProcess?.stdin?.write(cmd);
+          writeToStdin(cmd);
           return;
         }
         if (parsed.type === "stdin" && typeof parsed.data === "string") {
-          ptyProcess?.stdin?.write(parsed.data);
+          writeToStdin(parsed.data);
           return;
         }
         if (parsed.type === "ping") {
@@ -195,14 +234,22 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
           return;
         }
         if (parsed.type === "resize") {
-          // Window resize event (if supported)
+          const cols = typeof parsed.cols === "number" ? Math.max(1, parsed.cols) : 120;
+          const rows = typeof parsed.rows === "number" ? Math.max(1, parsed.rows) : 30;
+          if (ptyProcess && typeof ptyProcess.resize === "function") {
+            try {
+              ptyProcess.resize(cols, rows);
+            } catch {
+              // ignore
+            }
+          }
           return;
         }
       }
       // Raw terminal keystroke data from xterm.js onData
-      ptyProcess?.stdin?.write(str);
+      writeToStdin(str);
     } catch {
-      ptyProcess?.stdin?.write(str);
+      writeToStdin(str);
     }
   });
 
@@ -215,6 +262,13 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
         /* ignore */
       }
     }
+    if (childProcess) {
+      try {
+        childProcess.kill();
+      } catch {
+        /* ignore */
+      }
+    }
   });
 
   ws.on("error", () => {
@@ -222,6 +276,13 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
     if (ptyProcess) {
       try {
         ptyProcess.kill();
+      } catch {
+        /* ignore */
+      }
+    }
+    if (childProcess) {
+      try {
+        childProcess.kill();
       } catch {
         /* ignore */
       }

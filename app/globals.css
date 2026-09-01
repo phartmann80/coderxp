@@ -1,3 +1,6 @@
+@import "@fontsource/cascadia-mono/400.css";
+@import "@fontsource/cascadia-mono/700.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,6 +8,7 @@
 :root {
   --font-inter: 'Inter', sans-serif;
   --font-jetbrains: 'JetBrains Mono', monospace;
+  --font-cascadia: 'Cascadia Mono', 'Cascadia Code', monospace;
 
   /* CoderXP Workspace v2 tokens */
   --bg-app: #151617;

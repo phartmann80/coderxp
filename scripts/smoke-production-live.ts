@@ -207,6 +207,18 @@ async function main() {
             ws.send(JSON.stringify({ type: "command", command: "pwd", args: [] }));
           } else if (step === 4 && allOutput.includes("/workspace")) {
             console.log("[PASS] Real workspace directory verified: `pwd` -> /workspace");
+            // Step 5: Send real TTY test assertion
+            step = 5;
+            allOutput = "";
+            ws.send(JSON.stringify({ type: "command", command: "[ -t 0 ] && echo TTY_OK", args: [] }));
+          } else if (step === 5 && allOutput.includes("TTY_OK")) {
+            console.log("[PASS] Real interactive TTY verified: `[ -t 0 ] && echo TTY_OK` -> TTY_OK");
+            // Step 6: Send terminal columns test assertion
+            step = 6;
+            allOutput = "";
+            ws.send(JSON.stringify({ type: "command", command: "tput", args: ["cols"] }));
+          } else if (step === 6 && (allOutput.includes("120") || allOutput.includes("80"))) {
+            console.log("[PASS] Real PTY window size discipline verified: `tput cols` -> " + allOutput.trim());
             clearTimeout(timeout);
             try { ws.close(); } catch { /* ignore */ }
             resolve();
@@ -223,7 +235,7 @@ async function main() {
     });
 
     ws.on("close", (code, reason) => {
-      if (step < 4) {
+      if (step < 6) {
         clearTimeout(timeout);
         reject(new Error(`WebSocket closed at step ${step} with code ${code}: ${reason.toString()}`));
       }

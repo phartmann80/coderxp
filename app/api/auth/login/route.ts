@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest): Promise<Response> {
   try {
     const body = await req.json().catch(() => ({}));
-    const identifier = body.email || body.username || "";
+    const identifier = body.identifier || body.email || body.username || "";
     const password = body.password || "";
 
     if (!identifier || !password) {

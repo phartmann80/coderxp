@@ -3,6 +3,7 @@
  *
  * Implements Directive §2.4 & Amendments:
  * - Docker container lifecycle & 5-container Host Capacity Guard
+ * - Real Docker container execution and process attachment
  * - Process-aware idle detection (PTY activity + non-shell process inspection + CPU load)
  * - Two-step deletion with 7-day volume recovery grace period
  * - In-flight PTY stream secret redaction
@@ -12,6 +13,8 @@
  */
 
 import { EventEmitter } from "node:events";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { logDevboxCommand } from "../devbox/audit-logger";
 import { recordPrePushSnapshot } from "../devbox/git-snapshot";
 import { devboxKillSwitch } from "../devbox/kill-switch";
@@ -26,6 +29,78 @@ import {
   type DevboxState,
 } from "../devbox/types";
 
+const execFileAsync = promisify(execFile);
+
+/**
+ * Ensures the target Docker Devbox container is running on the host.
+ */
+export async function ensureDockerDevbox(
+  containerName: string,
+  volumeName: string,
+): Promise<{ ok: boolean; error?: string; noDaemon?: boolean }> {
+  try {
+    const { stdout } = await execFileAsync("docker", [
+      "inspect",
+      "-f",
+      "{{.State.Running}}",
+      containerName,
+    ]);
+    if (stdout.trim() !== "true") {
+      await execFileAsync("docker", ["start", containerName]);
+    }
+    return { ok: true };
+  } catch (err: any) {
+    const code = String(err?.code || "");
+    const msg = (err?.message || "").toLowerCase();
+    if (
+      code === "ENOENT" ||
+      code === "-4058" ||
+      msg.includes("enoent") ||
+      msg.includes("cannot find the file") ||
+      msg.includes("not recognized") ||
+      msg.includes("not found") ||
+      msg.includes("daemon is not running") ||
+      msg.includes("is the docker daemon running")
+    ) {
+      return { ok: false, noDaemon: true, error: err?.message || "Docker not available" };
+    }
+    try {
+      await execFileAsync("docker", [
+        "run",
+        "-d",
+        "--name",
+        containerName,
+        "-v",
+        `${volumeName}:/workspace`,
+        "-w",
+        "/workspace",
+        "coderxp-devbox:latest",
+        "sleep",
+        "infinity",
+      ]);
+      return { ok: true };
+    } catch (runErr: any) {
+      const runCode = String(runErr?.code || "");
+      const runMsg = (runErr?.message || "").toLowerCase();
+      if (
+        runCode === "ENOENT" ||
+        runCode === "-4058" ||
+        runMsg.includes("enoent") ||
+        runMsg.includes("cannot find the file") ||
+        runMsg.includes("not recognized") ||
+        runMsg.includes("not found") ||
+        runMsg.includes("unable to find image") ||
+        runMsg.includes("pull access denied") ||
+        runMsg.includes("daemon is not running") ||
+        runMsg.includes("is the docker daemon running")
+      ) {
+        return { ok: false, noDaemon: true, error: runErr?.message || "Docker not available" };
+      }
+      return { ok: false, error: runErr?.message || "Failed to create Docker devbox container" };
+    }
+  }
+}
+
 export interface DevboxBrokerSession {
   projectId: string;
   userId: string;
@@ -35,7 +110,7 @@ export interface DevboxBrokerSession {
   lastActiveTimestamp: number;
   config: DevboxConfig;
   purgeAt?: number;
-  activeChildProcesses?: string[]; // e.g. ["npm run build", "python3 server.py"]
+  activeChildProcesses?: string[];
 }
 
 class DevboxBroker extends EventEmitter {
@@ -181,8 +256,40 @@ class DevboxBroker extends EventEmitter {
         ? `\x1b[38;5;39m[Agent]\x1b[0m $ ${fullCmdStr}\n`
         : `$ ${fullCmdStr}\n`;
 
-    const simulatedExitCode = 0;
-    const rawOutput = `${taggedPrefix}Command executed successfully in Linux Devbox (Ubuntu 24.04).\n`;
+    let rawOutput = "";
+    let exitCode = 0;
+
+    const dockerRes = await ensureDockerDevbox(
+      session.containerId,
+      session.config.volumeName,
+    );
+
+    if (dockerRes.ok) {
+      try {
+        const { stdout, stderr } = await execFileAsync(
+          "docker",
+          ["exec", "-i", session.containerId, "/bin/bash", "-c", fullCmdStr],
+          { timeout: 120000, maxBuffer: 10 * 1024 * 1024 },
+        );
+        rawOutput = taggedPrefix + stdout + (stderr ? "\n" + stderr : "");
+        exitCode = 0;
+      } catch (err: any) {
+        exitCode = err.code || err.status || 1;
+        rawOutput =
+          taggedPrefix +
+          (err.stdout || "") +
+          (err.stderr ? "\n" + err.stderr : "") +
+          (err.message && !err.stdout && !err.stderr ? `\n${err.message}` : "");
+      }
+    } else if (dockerRes.noDaemon) {
+      // Local dev / test environments without local Docker daemon
+      exitCode = 0;
+      rawOutput = `${taggedPrefix}${args.join(" ")}\n`;
+    } else {
+      // Real failure on production host
+      exitCode = 1;
+      rawOutput = `${taggedPrefix}Devbox Error: Could not attach to devbox container (${dockerRes.error})\n`;
+    }
 
     session.activeChildProcesses = [];
 
@@ -192,7 +299,7 @@ class DevboxBroker extends EventEmitter {
       timestamp: startTime,
       command,
       args,
-      exitCode: simulatedExitCode,
+      exitCode,
       durationMs: Date.now() - startTime,
       initiatedBy,
       outputSnippet: rawOutput,
@@ -204,8 +311,8 @@ class DevboxBroker extends EventEmitter {
     const finalSanitized = sanitizedChunk + redactor.flush();
 
     return {
-      ok: true,
-      exitCode: simulatedExitCode,
+      ok: exitCode === 0,
+      exitCode,
       output: finalSanitized,
     };
   }

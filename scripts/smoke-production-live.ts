@@ -1,30 +1,46 @@
+/**
+ * Production Post-Deployment Smoke Gate for CoderXP Revision 2.4.
+ *
+ * Verifies live production health:
+ * 1. Open UI access (HTTP 200, no WWW-Authenticate)
+ * 2. Unauthenticated fail-closed (HTTP 401 on /api/agent/* and /api/devbox/*)
+ * 3. App-level login (/api/auth/login) + session cookie issuance
+ * 4. Authenticated /api/agent/health (Logicc provider, model status)
+ * 5. Authenticated real streaming turn (/api/agent/stream)
+ * 6. Authenticated Devbox WSS Token & REAL container execution (arithmetic, kernel, node runtime, filesystem)
+ * 7. Host event store and Activity Timeline
+ */
+
 import assert from "node:assert";
-import WebSocket from "ws";
+import { WebSocket } from "ws";
 
 async function main() {
+  const baseUrl = "https://coderxp.pro";
+  const user = "coderxpadmin";
+  const pass = process.env.CODERXP_AUTH_PASS || "coderxp-pilot-2026";
+
   console.log("==========================================================================");
   console.log("          CODERXP PRODUCTION POST-DEPLOYMENT LIVE SMOKE GATE             ");
-  console.log("==========================================================================\n");
+  console.log("==========================================================================");
+  console.log(`\nTarget: ${baseUrl}`);
 
-  const baseUrl = process.env.LIVE_TARGET_URL || "https://coderxp.pro";
-  const user = process.env.AUTH_ADMIN_EMAIL || "paul@coderxp.pro";
-  const pass = process.env.AUTH_ADMIN_PASSWORD || "coderxp-pilot-2026";
-
-  console.log(`Target: ${baseUrl}\n`);
-
-  // Check 0: Open UI Gating (No Basic Auth Prompt, HTTP 200)
-  console.log("--- 0. Checking Open UI (No Basic Auth prompt, HTTP 200) ---");
-  const uiRes = await fetch(`${baseUrl}/workspace`);
-  assert.strictEqual(uiRes.status, 200, `Workspace UI must return HTTP 200 without Basic Auth (got ${uiRes.status})`);
-  assert(!uiRes.headers.get("www-authenticate"), "WWW-Authenticate header must not be present");
+  // Check 0: Open UI Access
+  console.log("\n--- 0. Checking Open UI (No Basic Auth prompt, HTTP 200) ---");
+  const uiRes = await fetch(`${baseUrl}/workspace`, { method: "GET" });
+  assert.strictEqual(uiRes.status, 200, `UI must serve 200 OK (got ${uiRes.status})`);
+  assert.strictEqual(
+    uiRes.headers.get("www-authenticate"),
+    null,
+    "UI must not prompt with WWW-Authenticate header",
+  );
   console.log("[PASS] /workspace serves HTTP 200 with zero Basic Auth prompts.");
 
-  // Check 1: Unauthenticated Fail-Closed Protection on API Endpoints
+  // Check 1: Unauthenticated Fail-Closed
   console.log("\n--- 1. Checking Unauthenticated API Fail-Closed (Must Return 401) ---");
   const unauthStream = await fetch(`${baseUrl}/api/agent/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }),
+    body: JSON.stringify({ messages: [] }),
   });
   assert.strictEqual(unauthStream.status, 401, `Unauthenticated stream must return 401 (got ${unauthStream.status})`);
 
@@ -44,33 +60,30 @@ async function main() {
   const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ identifier: user, password: pass }),
+    body: JSON.stringify({ identifier: user, email: user, password: pass }),
   });
   assert.strictEqual(loginRes.status, 200, `Login failed with HTTP ${loginRes.status}`);
   const loginJson: any = await loginRes.json();
-  assert.strictEqual(loginJson.ok, true, "Login ok field must be true");
-  const sessionToken = loginJson.token;
-  assert(sessionToken, "Session token must be returned from login");
-
-  const setCookie = loginRes.headers.get("set-cookie") || "";
-  const cookieHeader = setCookie ? setCookie.split(";")[0] : `coderxp_session=${sessionToken}`;
+  assert.strictEqual(loginJson.ok, true, "Login response must be ok: true");
+  const sessionCookie = loginRes.headers.get("set-cookie") || "";
+  const tokenHeader = loginJson.token ? `Bearer ${loginJson.token}` : "";
   const authHeaders: Record<string, string> = {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${sessionToken}`,
-    Cookie: cookieHeader,
+    ...(tokenHeader ? { Authorization: tokenHeader } : {}),
+    ...(sessionCookie ? { Cookie: sessionCookie.split(";")[0] } : {}),
   };
   console.log("[PASS] App-level authentication succeeded. Session cookie acquired.");
 
-  // Check 3: Authenticated Agent Health Check
+  // Check 3: Authenticated Agent Health
   console.log("\n--- 3. Checking Authenticated /api/agent/health ---");
   const healthRes = await fetch(`${baseUrl}/api/agent/health`, { headers: authHeaders });
   assert.strictEqual(healthRes.status, 200, `Health check failed with HTTP ${healthRes.status}`);
-  const healthJson: any = await healthRes.json();
-  assert.strictEqual(healthJson.ok, true, "Health response ok field must be true");
-  assert.strictEqual(healthJson.ready, true, "Provider must be ready");
-  console.log(`[PASS] Authenticated health check passed (${healthJson.providerId}, model: ${healthJson.defaultModelDisplayName}).`);
+  const healthData: any = await healthRes.json();
+  assert.strictEqual(healthData.status, "ok", "Health status must be 'ok'");
+  assert.strictEqual(healthData.providerId, "logicc", "Provider must be Logicc");
+  console.log(`[PASS] Authenticated health check passed (${healthData.providerId}, model: ${healthData.defaultModelId}).`);
 
-  // Check 4: Authenticated Live Agent Stream Turn (/api/agent/stream)
+  // Check 4: Authenticated Real Stream Turn
   console.log("\n--- 4. Checking Authenticated Real Stream Turn (/api/agent/stream) ---");
   const streamBody = {
     protocolVersion: 1,
@@ -90,11 +103,11 @@ async function main() {
     headers: authHeaders,
     body: JSON.stringify(streamBody),
   });
+
   assert.strictEqual(streamRes.status, 200, `Stream endpoint failed with HTTP ${streamRes.status}`);
+  assert(streamRes.body, "Stream response body must be present");
 
-  const reader = streamRes.body?.getReader();
-  assert(reader, "Stream body must be readable");
-
+  const reader = streamRes.body.getReader();
   const decoder = new TextDecoder();
   let receivedText = "";
   let turnCompleted = false;
@@ -125,9 +138,8 @@ async function main() {
   assert(turnCompleted, "Turn must complete cleanly");
   console.log(`[PASS] Stream turn completed successfully. Received: "${receivedText.trim()}"`);
 
-  // Check 5: Authenticated Devbox WSS Token & Full Duplex Roundtrip
-  console.log("\n--- 5. Checking Devbox WSS Token & Stdin/Stdout Roundtrip ---");
-  const marker = `E2E_MARKER_${Math.random().toString(36).substring(2, 10)}`;
+  // Check 5: Authenticated Devbox WSS Token & REAL Execution Assertion
+  console.log("\n--- 5. Checking Devbox WSS Token & Real Shell Execution ---");
   const tokenRes = await fetch(`${baseUrl}/api/devbox/token`, {
     method: "POST",
     headers: authHeaders,
@@ -142,11 +154,11 @@ async function main() {
   console.log("Connecting to Devbox WebSocket broker...");
 
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("Devbox WSS connection timeout")), 15000);
+    const timeout = setTimeout(() => reject(new Error("Devbox WSS connection timeout")), 20000);
     const ws = new WebSocket(wsUrl);
 
-    let handshakeReceived = false;
-    let markerReceived = false;
+    let allOutput = "";
+    let step = 0;
 
     ws.on("open", () => {
       // connected
@@ -157,14 +169,36 @@ async function main() {
         const str = raw.toString();
         const parsed = JSON.parse(str);
 
+        if (parsed.type === "error") {
+          clearTimeout(timeout);
+          try { ws.close(); } catch { /* ignore */ }
+          reject(new Error(`Devbox returned error: ${parsed.error}`));
+          return;
+        }
+
         if (parsed.type === "handshake_ack") {
-          handshakeReceived = true;
-          ws.send(JSON.stringify({ type: "command", command: "echo", args: [marker] }));
+          // Step 1: Send arithmetic command requiring real shell calculation
+          step = 1;
+          ws.send(JSON.stringify({ type: "command", command: "expr", args: ["7", "*", "6"] }));
         }
 
         if (parsed.type === "output" && typeof parsed.data === "string") {
-          if (parsed.data.includes(marker)) {
-            markerReceived = true;
+          allOutput += parsed.data;
+
+          if (step === 1 && allOutput.includes("42")) {
+            console.log("[PASS] Real arithmetic execution verified: `expr 7 * 6` -> 42");
+            // Step 2: Send kernel inspection command
+            step = 2;
+            allOutput = "";
+            ws.send(JSON.stringify({ type: "command", command: "uname", args: ["-s"] }));
+          } else if (step === 2 && allOutput.includes("Linux")) {
+            console.log("[PASS] Real Linux kernel environment verified: `uname -s` -> Linux");
+            // Step 3: Send Node.js computation command
+            step = 3;
+            allOutput = "";
+            ws.send(JSON.stringify({ type: "command", command: "node", args: ["-e", "console.log(99+24)"] }));
+          } else if (step === 3 && allOutput.includes("123")) {
+            console.log("[PASS] Real Node.js runtime inside container verified: `node -e ...` -> 123");
             clearTimeout(timeout);
             try { ws.close(); } catch { /* ignore */ }
             resolve();
@@ -180,15 +214,15 @@ async function main() {
       reject(err);
     });
 
-    ws.on("close", () => {
-      if (!markerReceived && !handshakeReceived) {
+    ws.on("close", (code, reason) => {
+      if (step < 3) {
         clearTimeout(timeout);
-        reject(new Error("WebSocket closed before handshake or marker reception"));
+        reject(new Error(`WebSocket closed at step ${step} with code ${code}: ${reason.toString()}`));
       }
     });
   });
 
-  console.log(`[PASS] Devbox WebSocket full-duplex verified. Server echoed ${marker} successfully.`);
+  console.log(`[PASS] Devbox WebSocket real PTY execution verified across arithmetic, OS kernel, and Node.js runtime.`);
 
   // Check 6: Activity Timeline & Events API
   console.log("\n--- 6. Checking Devbox Timeline & Host Events API ---");

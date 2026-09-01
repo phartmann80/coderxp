@@ -59,6 +59,12 @@ docker ps --filter name=coderxp-app
 
 # Step 5: Post-Deployment Production Smoke Gate
 echo "\n=== STEP 5: RUNNING POST-DEPLOYMENT SMOKE GATE ON PRODUCTION ==="
+if [ -f /etc/coderxp/coderxp.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source /etc/coderxp/coderxp.env 2>/dev/null || true
+  set +a
+fi
 if npx tsx scripts/smoke-production-live.ts; then
   echo "\n[SUCCESS] Production smoke gate passed 100%!"
   docker tag "${TARGET_IMAGE}" coderxp:latest

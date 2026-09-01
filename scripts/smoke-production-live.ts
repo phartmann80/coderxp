@@ -7,8 +7,15 @@ async function main() {
   console.log("==========================================================================\n");
 
   const baseUrl = process.env.LIVE_TARGET_URL || "https://coderxp.pro";
-  const authHeader = "Basic " + Buffer.from("coderxpadmin:coderxp-pilot-auth-2026").toString("base64");
-  const headers = { Authorization: authHeader, "Content-Type": "application/json" };
+  const authHeader =
+    process.env.LIVE_AUTH_HEADER ||
+    (process.env.BASIC_AUTH_USER && process.env.BASIC_AUTH_PASS
+      ? "Basic " + Buffer.from(`${process.env.BASIC_AUTH_USER}:${process.env.BASIC_AUTH_PASS}`).toString("base64")
+      : "");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (authHeader) {
+    headers.Authorization = authHeader;
+  }
 
   console.log(`Target: ${baseUrl}\n`);
 

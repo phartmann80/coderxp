@@ -101,7 +101,7 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
 
   try {
     if (ptyModule) {
-      ptyProcess = ptyModule.spawn("docker", ["exec", "-it", containerName, "/bin/bash", "-l"], {
+      ptyProcess = ptyModule.spawn("docker", ["exec", "-it", "-e", "PORT=3000", containerName, "/bin/bash", "-l"], {
         name: "xterm-256color",
         cols: 120,
         rows: 30,
@@ -130,7 +130,7 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
         }
       });
     } else {
-      childProcess = spawn("docker", ["exec", "-i", containerName, "/bin/bash", "-l"], {
+      childProcess = spawn("docker", ["exec", "-i", "-e", "PORT=3000", containerName, "/bin/bash", "-l"], {
         stdio: ["pipe", "pipe", "pipe"],
         env: {
           ...process.env,

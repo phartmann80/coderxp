@@ -74,6 +74,8 @@ export async function ensureDockerDevbox(
         `${volumeName}:/workspace`,
         "-w",
         "/workspace",
+        "-e",
+        "PORT=3000",
         "coderxp-devbox:latest",
         "sleep",
         "infinity",
@@ -268,7 +270,7 @@ class DevboxBroker extends EventEmitter {
       try {
         const { stdout, stderr } = await execFileAsync(
           "docker",
-          ["exec", "-i", session.containerId, "/bin/bash", "-c", fullCmdStr],
+          ["exec", "-i", "-e", "PORT=3000", session.containerId, "/bin/bash", "-c", fullCmdStr],
           { timeout: 120000, maxBuffer: 10 * 1024 * 1024 },
         );
         rawOutput = taggedPrefix + stdout + (stderr ? "\n" + stderr : "");

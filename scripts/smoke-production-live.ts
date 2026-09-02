@@ -12,6 +12,7 @@
  */
 
 import assert from "node:assert";
+import tls from "node:tls";
 import { WebSocket } from "ws";
 
 async function main() {
@@ -256,6 +257,90 @@ async function main() {
   const eventsData: any = await eventsRes.json();
   assert(Array.isArray(eventsData.events), "Events must be an array");
   console.log("[PASS] Host event store and Activity Timeline verified.");
+
+  // Check 7: Live Preview Subsystem & Wildcard TLS Verification (4 Smoke Assertions)
+  console.log("\n--- 7. Checking Live Preview Subsystem & Wildcard TLS (4 Smoke Assertions) ---");
+
+  // 7.1 Preview Link Creation (>= 128-bit slug, HTTP 200, T2 event)
+  console.log("  [7.1] Testing authenticated preview link creation (POST /api/preview/link)...");
+  const createLinkRes = await fetch(`${baseUrl}/api/preview/link`, {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({ projectId: "smoke-project", containerPort: 3000 }),
+  });
+  assert.strictEqual(createLinkRes.status, 200, `Preview link creation must return 200 (got ${createLinkRes.status})`);
+  const linkData: any = await createLinkRes.json();
+  assert.strictEqual(linkData.ok, true, "Preview link creation response must be ok: true");
+  assert.ok(typeof linkData.slug === "string", "Preview slug must be a string");
+  assert.strictEqual(linkData.slug.length, 32, `Preview slug must be exactly 32 hex characters (128-bit), got ${linkData.slug.length}`);
+  assert.match(linkData.slug, /^[0-9a-f]{32}$/, "Preview slug must be valid 128-bit lowercase hex");
+  assert.ok(linkData.url.includes(`${linkData.slug}.preview.coderxp.pro`), "Preview URL must contain slug and preview.coderxp.pro");
+  console.log(`  [PASS] 7.1 Created 128-bit preview slug: ${linkData.slug} -> ${linkData.url}`);
+
+  // 7.2 Wildcard DNS Resolution
+  console.log(`  [7.2] Testing DNS resolution for ${linkData.slug}.preview.coderxp.pro...`);
+  const dohRes = await fetch(
+    `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(linkData.slug)}.preview.coderxp.pro&type=A`,
+    { headers: { Accept: "application/dns-json" } },
+  );
+  assert.strictEqual(dohRes.status, 200, `DoH lookup must return 200 (got ${dohRes.status})`);
+  const dohData: any = await dohRes.json();
+  assert.strictEqual(dohData.Status, 0, `DNS query status must be NOERROR (0), got ${dohData.Status}`);
+  const aRecord = (dohData.Answer || []).find((ans: any) => ans.type === 1);
+  assert.ok(aRecord, `Wildcard A record must be found for ${linkData.slug}.preview.coderxp.pro`);
+  assert.strictEqual(aRecord.data, "31.70.107.44", `Wildcard DNS must resolve to host IP 31.70.107.44 (got ${aRecord.data})`);
+  console.log(`  [PASS] 7.2 Wildcard DNS verified: ${linkData.slug}.preview.coderxp.pro -> 31.70.107.44`);
+
+  // 7.3 Wildcard TLS Handshake Verification
+  console.log(`  [7.3] Testing TLS SNI handshake against ${linkData.slug}.preview.coderxp.pro:443...`);
+  await new Promise<void>((resolve, reject) => {
+    const socket = tls.connect(
+      {
+        host: "31.70.107.44",
+        port: 443,
+        servername: `${linkData.slug}.preview.coderxp.pro`,
+        rejectUnauthorized: true,
+      },
+      () => {
+        const cert: any = socket.getPeerCertificate(true);
+        socket.end();
+        try {
+          assert.ok(cert, "TLS peer certificate must be presented");
+          const san = cert.subjectaltname || "";
+          assert.ok(
+            san.includes("*.preview.coderxp.pro"),
+            `Certificate SAN must contain *.preview.coderxp.pro (got: ${san})`,
+          );
+          console.log(`  [PASS] 7.3 TLS handshake verified with wildcard certificate (SAN: ${san}, Subject: ${cert.subject.CN})`);
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      },
+    );
+    socket.on("error", (err) => reject(err));
+    socket.setTimeout(10000, () => {
+      socket.destroy();
+      reject(new Error("TLS connection timed out after 10s"));
+    });
+  });
+
+  // 7.4 Revocation & Audit Verification (DELETE /api/preview/link)
+  console.log(`  [7.4] Testing preview link revocation and audit...`);
+  const revokeRes = await fetch(`${baseUrl}/api/preview/link`, {
+    method: "DELETE",
+    headers: authHeaders,
+    body: JSON.stringify({ slug: linkData.slug, projectId: "smoke-project" }),
+  });
+  assert.strictEqual(revokeRes.status, 200, `Revocation must return 200 (got ${revokeRes.status})`);
+  const revokeData: any = await revokeRes.json();
+  assert.strictEqual(revokeData.ok, true, "Revocation response must be ok: true");
+  assert.strictEqual(revokeData.revoked, true, "Revocation status must be true");
+
+  // Verify subsequent resolution fails
+  const checkResolved = await fetch(`${baseUrl}/api/preview/resolve?slug=${encodeURIComponent(linkData.slug)}`);
+  assert.strictEqual(checkResolved.status, 404, `Revoked preview link must fail with 404 (got ${checkResolved.status})`);
+  console.log(`  [PASS] 7.4 Revocation verified: slug ${linkData.slug} revoked and returned 404.`);
 
   console.log("\n==========================================================================");
   console.log("  ALL POST-DEPLOYMENT SMOKE ASSERTIONS PASSED PERFECTLY ON PRODUCTION!   ");

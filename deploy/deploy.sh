@@ -54,7 +54,16 @@ docker run -d --name coderxp-app \
 
 echo "Restarting Devbox Broker service..."
 systemctl restart coderxp-broker.service
-sleep 5
+
+echo "Waiting for Next.js app container to be ready on port 3100..."
+for i in $(seq 1 30); do
+  STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3100/api/agent/health || echo "000")
+  if [ "${STATUS_CODE}" = "200" ] || [ "${STATUS_CODE}" = "401" ]; then
+    echo "Next.js is healthy and responding (HTTP ${STATUS_CODE}, attempt ${i})."
+    break
+  fi
+  sleep 1
+done
 
 docker ps --filter name=coderxp-app
 

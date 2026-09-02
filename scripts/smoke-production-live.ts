@@ -83,7 +83,12 @@ async function main() {
     "Health status must be 'ready' or 'ok'",
   );
   assert.strictEqual(healthData.providerId, "logicc", "Provider must be Logicc");
-  console.log(`[PASS] Authenticated health check passed (${healthData.providerId}, model: ${healthData.defaultModelId}).`);
+  const reportedModel = healthData.model || healthData.defaultModel || healthData.defaultModelDisplayName;
+  assert.ok(
+    typeof reportedModel === "string" && reportedModel.trim().length > 0 && reportedModel !== "undefined",
+    `Health endpoint must return non-empty model identifier, got: ${reportedModel}`
+  );
+  console.log(`[PASS] Authenticated health check passed (${healthData.providerId}, model: ${reportedModel}).`);
 
   // Check 4: Authenticated Real Stream Turn
   console.log("\n--- 4. Checking Authenticated Real Stream Turn (/api/agent/stream) ---");

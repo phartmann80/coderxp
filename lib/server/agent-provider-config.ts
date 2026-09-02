@@ -65,7 +65,10 @@ export function getLogiccAllowedModels(env: EnvBag = process.env): readonly stri
 
 export function getLogiccDefaultModel(env: EnvBag = process.env): string | null {
   const raw = (env.LOGICC_DEFAULT_MODEL ?? "").trim();
-  return raw.length > 0 ? raw : null;
+  if (raw.length > 0) return raw;
+  const allowed = getLogiccAllowedModels(env);
+  if (allowed.length > 0) return allowed[0];
+  return "azure/gpt-4o-mini";
 }
 
 /**

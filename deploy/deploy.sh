@@ -48,6 +48,7 @@ docker run -d --name coderxp-app \
   --restart unless-stopped \
   --network coderxp-net \
   -p 127.0.0.1:3100:3000 \
+  -v /opt/coderxp/data:/opt/coderxp/data \
   --env-file /etc/coderxp/coderxp.env \
   "${TARGET_IMAGE}"
 

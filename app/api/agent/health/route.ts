@@ -32,6 +32,8 @@ export async function GET(req: Request): Promise<Response> {
     ok: health.ok,
     provider: health.provider === "anthropic-byok" ? "anthropic" : health.provider,
     providerId: health.provider,
+    model: health.defaultModelDisplayName || "azure/gpt-4o-mini",
+    defaultModel: health.defaultModelDisplayName || "azure/gpt-4o-mini",
     ready: health.ready,
     access: health.access,
     status: health.status,

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env tsx
+#!/usr/bin/env tsx
 /**
  * CoderXP Preview Router (port 3400)
  *

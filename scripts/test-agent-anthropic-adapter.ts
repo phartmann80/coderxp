@@ -51,8 +51,8 @@ async function runAnthropicAdapterTests() {
   // -------------------------------------------------------------------------
   console.log("\n--- 1. TOOL MANIFEST PARITY WITH EXECUTABLE REGISTRY ---");
 
-  assert(CANONICAL_TOOL_MANIFEST.length === 16, "Manifest contains exactly 16 tools");
-  assert(AGENT_TOOLS.length === 16, "Executable registry contains exactly 16 tools");
+  assert(CANONICAL_TOOL_MANIFEST.length === 17, "Manifest contains exactly 17 tools");
+  assert(AGENT_TOOLS.length === 17, "Executable registry contains exactly 17 tools");
 
   for (const execDef of AGENT_TOOLS) {
     const manifestTool = getManifestTool(execDef.name);
@@ -112,7 +112,7 @@ async function runAnthropicAdapterTests() {
     assert(validResult.body.system === "You are a helpful software engineering assistant.", "System prompt translated");
     assert(validResult.body.messages.length === 1, "User message present in Anthropic messages array");
     assert(validResult.body.messages[0].role === "user", "User role mapped correctly");
-    assert(validResult.body.tools?.length === 16, "All 16 tools mapped to Anthropic tools format");
+    assert(validResult.body.tools?.length === CANONICAL_TOOL_MANIFEST.length, "All tools mapped to Anthropic tools format");
     assert(validResult.body.stream === true, "Stream parameter is explicitly true");
   }
 

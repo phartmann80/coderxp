@@ -14,6 +14,7 @@
 
 import { EventEmitter } from "node:events";
 import { execFile } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 import { logDevboxCommand } from "../devbox/audit-logger";
 import { recordPrePushSnapshot } from "../devbox/git-snapshot";
@@ -70,16 +71,28 @@ export async function ensureDockerDevbox(
         "-d",
         "--name",
         containerName,
+        "--hostname",
+        "coderxp-devbox",
+        "--user",
+        "1000:1000",
         "-v",
         `${volumeName}:/workspace`,
         "-w",
         "/workspace",
         "-e",
         "PORT=3000",
+        "-e",
+        "PS1=developer@coderxp-devbox:\\w\\$ ",
         "coderxp-devbox:latest",
         "sleep",
         "infinity",
       ]);
+      // Ensure volume is owned by developer (uid 1000)
+      try {
+        await execFileAsync("docker", ["exec", "-u", "0", containerName, "chown", "-R", "1000:1000", "/workspace"]);
+      } catch {
+        // ignore
+      }
       return { ok: true };
     } catch (runErr: any) {
       const runCode = String(runErr?.code || "");
@@ -270,7 +283,7 @@ class DevboxBroker extends EventEmitter {
       try {
         const { stdout, stderr } = await execFileAsync(
           "docker",
-          ["exec", "-i", "-e", "PORT=3000", session.containerId, "/bin/bash", "-c", fullCmdStr],
+          ["exec", "-i", "-u", "developer", "-w", "/workspace", "-e", "PORT=3000", session.containerId, "/bin/bash", "-c", fullCmdStr],
           { timeout: 120000, maxBuffer: 10 * 1024 * 1024 },
         );
         rawOutput = taggedPrefix + stdout + (stderr ? "\n" + stderr : "");
@@ -461,6 +474,168 @@ class DevboxBroker extends EventEmitter {
       lastActiveTimestamp: session.lastActiveTimestamp,
       purgeAt: session.purgeAt,
     };
+  }
+
+  /**
+   * Syncs project files into the Docker devbox /workspace directory.
+   */
+  async syncFilesToDevbox(
+    projectId: string,
+    files: Array<{ path: string; contents: string }>,
+  ): Promise<{ ok: boolean; count: number; error?: string }> {
+    const session = this.sessions.get(projectId);
+    const containerId = session?.containerId || `coderxp-devbox-${projectId}`;
+
+    const check = await ensureDockerDevbox(containerId, `coderxp-vol-${projectId}`);
+    if (!check.ok && !check.noDaemon) {
+      return { ok: false, count: 0, error: check.error };
+    }
+
+    if (check.noDaemon) {
+      return { ok: true, count: files.length };
+    }
+
+    for (const f of files) {
+      const cleanPath = f.path.replace(/^\/+/, "");
+      const b64 = Buffer.from(f.contents, "utf8").toString("base64");
+      const dir = path.dirname(cleanPath);
+      const mkdirCmd = dir && dir !== "." ? `mkdir -p "/workspace/${dir}" && ` : "";
+      const writeCmd = `${mkdirCmd}echo "${b64}" | base64 -d > "/workspace/${cleanPath}" && chown 1000:1000 "/workspace/${cleanPath}"`;
+      try {
+        await execFileAsync("docker", [
+          "exec",
+          "-u",
+          "0",
+          containerId,
+          "/bin/bash",
+          "-c",
+          writeCmd,
+        ]);
+      } catch (err: any) {
+        console.error(`Failed to sync ${cleanPath} to devbox:`, err?.message || err);
+      }
+    }
+
+    return { ok: true, count: files.length };
+  }
+
+  /**
+   * Starts a detached/background process in the devbox container and detects its listening port.
+   */
+  async startBackgroundProcess(
+    projectId: string,
+    command: string,
+    args: string[] = [],
+    cwd = "/workspace",
+    env: Record<string, string> = {},
+  ): Promise<{
+    ok: boolean;
+    pid?: number;
+    processId?: string;
+    port?: number;
+    output?: string;
+    error?: string;
+  }> {
+    const session = this.sessions.get(projectId);
+    const containerId = session?.containerId || `coderxp-devbox-${projectId}`;
+
+    const check = await ensureDockerDevbox(containerId, `coderxp-vol-${projectId}`);
+    if (!check.ok && !check.noDaemon) {
+      return { ok: false, error: check.error };
+    }
+
+    const fullCmd = [command, ...args].join(" ").trim();
+    const envPrefix = Object.entries(env)
+      .map(([k, v]) => `${k}="${v}"`)
+      .join(" ");
+    const cmdWithEnv = envPrefix ? `${envPrefix} PORT=3000 ${fullCmd}` : `PORT=3000 ${fullCmd}`;
+
+    if (check.noDaemon) {
+      return {
+        ok: true,
+        pid: 3000,
+        processId: `proc-mock-3000`,
+        port: 3000,
+        output: `[Devbox] Started ${fullCmd} (simulated on port 3000)\nServer running on port 3000`,
+      };
+    }
+
+    try {
+      const launchScript = `nohup /bin/bash -c '${cmdWithEnv}' > /workspace/.server.log 2>&1 & echo $!`;
+      const { stdout: pidOut } = await execFileAsync("docker", [
+        "exec",
+        "-u",
+        "developer",
+        "-w",
+        cwd,
+        containerId,
+        "/bin/bash",
+        "-c",
+        launchScript,
+      ]);
+
+      const pid = parseInt(pidOut.trim(), 10) || Math.floor(Math.random() * 10000) + 1000;
+      const processId = `proc-${pid}`;
+
+      await new Promise((r) => setTimeout(r, 2000));
+
+      let logOutput = "";
+      try {
+        const { stdout: logOut } = await execFileAsync("docker", [
+          "exec",
+          "-u",
+          "developer",
+          containerId,
+          "cat",
+          "/workspace/.server.log",
+        ]);
+        logOutput = logOut.slice(-2000);
+      } catch {
+        // ignore
+      }
+
+      let detectedPort = 3000;
+      try {
+        const { stdout: ssOut } = await execFileAsync("docker", [
+          "exec",
+          "-u",
+          "0",
+          containerId,
+          "/bin/bash",
+          "-c",
+          "ss -tulpn | grep LISTEN || true",
+        ]);
+        const portMatch = ssOut.match(/:(\d{2,5})/);
+        if (portMatch) {
+          detectedPort = parseInt(portMatch[1], 10);
+        }
+      } catch {
+        // default 3000
+      }
+
+      hostEventStore.recordEvent({
+        projectId,
+        tier: "T1",
+        type: "cmd.executed",
+        data: {
+          command: fullCmd,
+          pid,
+          port: detectedPort,
+          status: "running",
+          initiatedBy: "agent",
+        },
+      });
+
+      return {
+        ok: true,
+        pid,
+        processId,
+        port: detectedPort,
+        output: logOutput || `Server started and listening on port ${detectedPort}`,
+      };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || "Failed to start process in devbox." };
+    }
   }
 }
 

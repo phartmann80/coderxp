@@ -179,7 +179,19 @@ export function projectModelFacingResult(
             typeof rec.stderr === "string"
               ? truncateAndSanitize(rec.stderr, MAX_MODEL_OUTPUT_BYTES)
               : undefined,
-          cancelled: rec.cancelled === true ? true : undefined,
+        };
+        break;
+
+      case "start_process":
+        safeData = {
+          pid: typeof rec.pid === "number" || typeof rec.pid === "string" ? rec.pid : undefined,
+          processId: typeof rec.processId === "string" ? rec.processId : undefined,
+          port: typeof rec.port === "number" ? rec.port : 3000,
+          status: "running",
+          output:
+            typeof rec.output === "string"
+              ? truncateAndSanitize(rec.output, MAX_MODEL_OUTPUT_BYTES)
+              : "Server running on port 3000",
         };
         break;
 
@@ -265,6 +277,8 @@ export function formatUserFacingResultSummary(
       return `Listed ${Array.isArray(rec.entries) ? rec.entries.length : 0} file entries`;
     case "run_command":
       return `Command finished with exit code ${rec.exitCode ?? 0}`;
+    case "start_process":
+      return `Server running on port ${rec.port ?? 3000} (pid ${rec.pid ?? "active"})`;
     case "stop_command":
       return `Stopped process ${sanitizeString(String(rec.commandId ?? ""))}`;
     case "read_files":

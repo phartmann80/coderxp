@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { FileText, AlertCircle, RotateCw } from "lucide-react";
+import { FileText, AlertCircle, RotateCw, ExternalLink } from "lucide-react";
 import { EditorTabs } from "./EditorTabs";
 import { CodeEditor } from "./CodeEditor";
 import { getEntry } from "@/lib/workspace/persistence";
@@ -100,6 +100,8 @@ export function EditorPanel({
     };
   }, [flushAllRef, persistence.flushAll]);
 
+  const [reloadVersion, setReloadVersion] = useState(0);
+
   useEffect(() => {
     if (!invalidatePathsRef) return;
     invalidatePathsRef.current = (paths: string[]) => {
@@ -115,6 +117,7 @@ export function EditorPanel({
         }
         return next;
       });
+      setReloadVersion((v) => v + 1);
     };
     return () => {
       invalidatePathsRef.current = null;
@@ -203,7 +206,7 @@ export function EditorPanel({
       isMounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFile, project.id]);
+  }, [activeFile, project.id, reloadVersion]);
 
   useEffect(() => {
     function handleBeforeUnload(e: BeforeUnloadEvent) {
@@ -285,6 +288,29 @@ export function EditorPanel({
     [persistence],
   );
 
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  const handleOpenLivePreview = useCallback(async () => {
+    setPreviewLoading(true);
+    try {
+      const res = await fetch("/api/preview/link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) {
+        window.open(data.url, "_blank");
+      } else {
+        alert(data.error || "Could not generate live preview link.");
+      }
+    } catch (e: any) {
+      alert("Failed to reach preview service: " + (e?.message || String(e)));
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [project.id]);
+
   const currentContent = activeFile ? fileContents.get(activeFile) ?? persistence.getBuffer(activeFile) ?? "" : "";
   const activeLoadError = activeFile ? loadErrors.get(activeFile) ?? null : null;
   const activeSaveError = activeFile ? persistence.saveErrors.get(activeFile) ?? null : null;
@@ -302,14 +328,45 @@ export function EditorPanel({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-editor)", overflow: "hidden" }}>
-      {/* 35px Tab Bar */}
-      <EditorTabs
-        openTabs={openTabs}
-        activeFile={activeFile}
-        dirtyPaths={persistence.dirtyPaths}
-        onSelect={handleSelectTab}
-        onClose={handleCloseTab}
-      />
+      {/* 35px Tab Bar with Live Preview button */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-app)", borderBottom: "1px solid var(--border-soft)", height: 35, flex: "none" }}>
+        <div style={{ flex: 1, minWidth: 0, overflowX: "auto", display: "flex", height: "100%" }}>
+          <EditorTabs
+            openTabs={openTabs}
+            activeFile={activeFile}
+            dirtyPaths={persistence.dirtyPaths}
+            onSelect={handleSelectTab}
+            onClose={handleCloseTab}
+          />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", padding: "0 10px", gap: 8, flex: "none" }}>
+          <button
+            type="button"
+            className="btn live-preview-btn"
+            title="Open CoderXP Live Preview in private/incognito or new window"
+            onClick={handleOpenLivePreview}
+            disabled={previewLoading}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              height: 25,
+              padding: "0 10px",
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: "#38bdf8",
+              backgroundColor: "rgba(56, 189, 248, 0.12)",
+              border: "1px solid rgba(56, 189, 248, 0.35)",
+              borderRadius: 4,
+              cursor: previewLoading ? "wait" : "pointer",
+              transition: "all 0.15s ease",
+            }}
+          >
+            <ExternalLink style={{ width: 12, height: 12 }} />
+            <span>{previewLoading ? "Connecting…" : "Live Preview"}</span>
+          </button>
+        </div>
+      </div>
 
       {/* 24px Breadcrumb Row */}
       <div className="breadcrumb">

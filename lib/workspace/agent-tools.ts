@@ -33,6 +33,7 @@ export type AgentToolName =
   | "delete_file"
   // commands — WorkspaceCommandController
   | "run_command"
+  | "start_process"
   | "stop_command"
   | "read_command_output"
   // runtime — WorkspaceRuntime
@@ -278,6 +279,21 @@ export interface RunCommandData {
   cwd: string;
 }
 
+export interface StartProcessParams {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
+export interface StartProcessData {
+  pid: number | string;
+  processId: string;
+  port: number;
+  status: "running";
+  output: string;
+}
+
 export interface ReadCommandOutputParams {
   processId: string;
   /** Character offset to resume from, for incremental reads. Defaults to 0. */
@@ -507,9 +523,23 @@ export const AGENT_TOOLS: readonly AgentToolDefinition[] = [
     name: "run_command",
     category: "command",
     risk: "execute",
-    summary: "Start a real process in the workspace container.",
+    summary: "Start a real bounded process in the workspace container (timeout <= 120s).",
     parameters: [
       { name: "command", type: "string", required: true, description: "Executable, e.g. \"npm\"." },
+      { name: "args", type: "string[]", required: false, description: "Argument list." },
+      { name: "cwd", type: "string", required: false, description: "Working directory." },
+      { name: "env", type: "object", required: false, description: "Environment variables." },
+    ],
+    mutatesFiles: false,
+    requiresApproval: true,
+  },
+  {
+    name: "start_process",
+    category: "command",
+    risk: "execute",
+    summary: "Start a long-running web server or background process in the devbox and detect its listening port (e.g. 3000). Always use this for servers rather than run_command.",
+    parameters: [
+      { name: "command", type: "string", required: true, description: "Server command, e.g. \"node server.mjs\" or \"npm start\"." },
       { name: "args", type: "string[]", required: false, description: "Argument list." },
       { name: "cwd", type: "string", required: false, description: "Working directory." },
       { name: "env", type: "object", required: false, description: "Environment variables." },

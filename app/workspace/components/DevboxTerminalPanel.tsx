@@ -30,6 +30,7 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
   const wsRef = useRef<WebSocket | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
   const livenessTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   const [connState, setConnState] = useState<ConnectionState>("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -37,10 +38,6 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
   const connectDevbox = useCallback(async (isReconnect = false) => {
     if (isReconnect) {
       setConnState("reconnecting");
-      const term = termRef.current;
-      if (term) {
-        term.writeln("\r\n\x1b[1;33m[Devbox session dropped · Reconnecting to PTY broker…]\x1b[0m");
-      }
     } else {
       setConnState("connecting");
     }
@@ -91,8 +88,7 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
           // Authoritative Handshake Ack (Condition 2a)
           if (parsed.type === "handshake_ack") {
             setConnState("connected");
-            term.writeln("\r\n\x1b[1;32m✓ Connected to CoderXP Devbox PTY (Ubuntu 24.04 LTS)\x1b[0m");
-            term.writeln("\x1b[2m  Cascadia Mono · Real TTY Session Active\x1b[0m\r\n");
+            // Clean terminal: no banner text. Only bash prompt is rendered.
             // Send initial dimensions to PTY
             ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
             return;
@@ -119,18 +115,10 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
 
       ws.onclose = () => {
         setConnState("disconnected");
-        const term = termRef.current;
-        if (term) {
-          term.writeln("\r\n\x1b[1;33m[Devbox session disconnected]\x1b[0m");
-        }
       };
     } catch (err: any) {
       setConnState("disconnected");
       setError(err?.message || "Failed to initialize Devbox terminal.");
-      const term = termRef.current;
-      if (term) {
-        term.writeln(`\r\n\x1b[1;31mTerminal Error: ${err?.message || "Devbox unavailable"}\x1b[0m`);
-      }
     }
   }, [projectId]);
 
@@ -163,116 +151,133 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
   }, [connState, connectDevbox]);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    let isDisposed = false;
+    const container = containerRef.current;
+    if (!container) return;
 
-    const term = new Terminal({
-      cols: 80,
-      rows: 24,
-      cursorBlink: true,
-      fontSize: 14,
-      lineHeight: 1.2,
-      fontWeight: "400" as any,
-      fontWeightBold: "700" as any,
-      fontFamily: '"Cascadia Mono", "Cascadia Code", monospace',
-      theme: {
-        background: "#0a0b0d",
-        foreground: "#d4d4d4",
-        cursor: "#38bdf8",
-        selectionBackground: "#264f78",
-        black: "#0a0b0d",
-        red: "#ef4444",
-        green: "#22c55e",
-        yellow: "#eab308",
-        blue: "#38bdf8",
-        magenta: "#a855f7",
-        cyan: "#06b6d4",
-        white: "#e5e7eb",
-      },
-      allowProposedApi: true,
-      scrollback: 5000,
-    });
-
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.loadAddon(new WebLinksAddon());
-
-    term.open(containerRef.current);
-    fitAddon.fit();
-
-    termRef.current = term;
-    fitRef.current = fitAddon;
-
-    // Ensure metrics align after custom font loads
-    if (typeof document !== "undefined" && document.fonts) {
-      document.fonts.ready.then(() => {
+    const initTerminal = async () => {
+      // Explicitly preload Cascadia Mono font before term.open()
+      if (typeof document !== "undefined" && document.fonts) {
         try {
+          await Promise.all([
+            document.fonts.load('400 14px "Cascadia Mono"'),
+            document.fonts.load('700 14px "Cascadia Mono"'),
+          ]);
+        } catch (fontErr) {
+          console.warn("Cascadia Mono preloading failed, falling back to monospace:", fontErr);
+        }
+      }
+
+      if (isDisposed || !containerRef.current) return;
+
+      const term = new Terminal({
+        cols: 120,
+        rows: 24,
+        cursorBlink: true,
+        fontSize: 14,
+        lineHeight: 1.2,
+        fontWeight: "400" as any,
+        fontWeightBold: "700" as any,
+        fontFamily: '"Cascadia Mono", monospace',
+        theme: {
+          background: "#0a0b0d",
+          foreground: "#d4d4d4",
+          cursor: "#38bdf8",
+          selectionBackground: "#264f78",
+          black: "#0a0b0d",
+          red: "#ef4444",
+          green: "#22c55e",
+          yellow: "#eab308",
+          blue: "#38bdf8",
+          magenta: "#a855f7",
+          cyan: "#06b6d4",
+          white: "#e5e7eb",
+        },
+        allowProposedApi: true,
+        scrollback: 5000,
+      });
+
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      term.loadAddon(new WebLinksAddon());
+
+      term.open(containerRef.current);
+      fitAddon.fit();
+
+      termRef.current = term;
+      fitRef.current = fitAddon;
+
+      // Real PTY onData stream: forward all raw bytes/keystrokes to Docker bash
+      term.onData((data) => {
+        const ws = wsRef.current;
+        const isConnected = ws && ws.readyState === WebSocket.OPEN;
+
+        if (!isConnected) {
+          connectDevbox(true);
+          return;
+        }
+
+        ws.send(data);
+      });
+
+      // Wire terminal resize events to PTY broker
+      term.onResize(({ cols, rows }) => {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(JSON.stringify({ type: "resize", cols, rows }));
+          } catch {
+            // ignore
+          }
+        }
+      });
+
+      // Connect devbox session
+      connectDevbox();
+
+      // ResizeObserver on the host container: fit and propagate resize to PTY
+      const observer = new ResizeObserver(() => {
+        try {
+          if (!containerRef.current) return;
           fitAddon.fit();
-          term.refresh(0, term.rows - 1);
+          const ws = wsRef.current;
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+          }
         } catch {
           // ignore
         }
       });
-    }
 
-    term.writeln("\x1b[1;36mCoderXP Devbox Interactive Terminal\x1b[0m");
-    term.writeln("\x1b[2mAuthenticating PTY session with broker…\x1b[0m");
-
-    // Real PTY onData stream: forward all raw bytes/keystrokes to Docker bash
-    term.onData((data) => {
-      const ws = wsRef.current;
-      const isConnected = ws && ws.readyState === WebSocket.OPEN;
-
-      if (!isConnected) {
-        term.writeln("\r\n\x1b[1;31m[Terminal disconnected — keystrokes not sent. Reconnecting…]\x1b[0m");
-        connectDevbox(true);
-        return;
-      }
-
-      ws.send(data);
-    });
-
-    // Wire terminal resize events to PTY broker
-    term.onResize(({ cols, rows }) => {
-      const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try {
-          ws.send(JSON.stringify({ type: "resize", cols, rows }));
-        } catch {
-          // ignore
-        }
-      }
-    });
-
-    connectDevbox();
-
-    const handleResize = () => {
-      try {
-        fitAddon.fit();
-      } catch {
-        // ignore
-      }
+      observer.observe(containerRef.current);
+      resizeObserverRef.current = observer;
     };
 
-    window.addEventListener("resize", handleResize);
+    void initTerminal();
 
     return () => {
-      window.removeEventListener("resize", handleResize);
+      isDisposed = true;
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect();
+      }
       if (wsRef.current) {
         wsRef.current.close();
       }
-      term.dispose();
+      if (termRef.current) {
+        termRef.current.dispose();
+      }
     };
   }, [projectId, connectDevbox]);
 
   return (
     <div className="relative w-full h-full flex flex-col bg-[#0a0b0d] overflow-hidden">
-      {/* Status Bar */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#111214] border-b border-[#27272a] text-[11px] font-mono text-[#a1a1aa]">
+      {/* Fixed-height Header (28px) */}
+      <div className="h-7 shrink-0 flex items-center justify-between px-3 bg-[#111214] border-b border-[#27272a] text-[11px] font-mono text-[#a1a1aa] select-none">
         <div className="flex items-center gap-2">
           <span
             className={`w-2 h-2 rounded-full ${
               connState === "connected"
-                ? "bg-emerald-500 animate-pulse"
+                ? "bg-emerald-500"
                 : connState === "reconnecting"
                 ? "bg-amber-500 animate-pulse"
                 : "bg-rose-500"
@@ -297,11 +302,11 @@ export function DevboxTerminalPanel({ projectId }: DevboxTerminalPanelProps) {
         )}
       </div>
 
-      {/* Terminal Canvas */}
+      {/* Terminal Host Container */}
       <div
         ref={containerRef}
-        className="flex-1 w-full p-2 overflow-hidden"
-        style={{ minHeight: "220px" }}
+        className="flex-1 w-full min-h-0 overflow-hidden relative"
+        style={{ padding: "4px 6px" }}
       />
     </div>
   );

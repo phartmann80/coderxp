@@ -314,6 +314,13 @@ export function useAgentChat(
             if (prev.length === 0) return prev;
             const last = prev[prev.length - 1];
             if (last.role !== "assistant") return prev;
+            const isTimeout =
+              event.error.code === "TIMEOUT" ||
+              event.error.message.includes("timeout limit");
+            const messageText = isTimeout
+              ? "The running command or process reached its execution time limit. The process was active in the workspace and output collected so far has been captured.\n\nOptions: Choose Stop Process or Keep Waiting."
+              : event.error.message;
+
             return [
               ...prev.slice(0, -1),
               {
@@ -324,7 +331,7 @@ export function useAgentChat(
                   {
                     id: `err-${Date.now()}`,
                     kind: "error",
-                    message: event.error.message,
+                    message: messageText,
                   },
                 ],
               },

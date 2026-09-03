@@ -101,16 +101,36 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
 
   try {
     if (ptyModule) {
-      ptyProcess = ptyModule.spawn("docker", ["exec", "-it", "-e", "PORT=3000", containerName, "/bin/bash", "-l"], {
-        name: "xterm-256color",
-        cols: 120,
-        rows: 30,
-        cwd: "/root",
-        env: {
-          ...process.env,
-          TERM: "xterm-256color",
+      ptyProcess = ptyModule.spawn(
+        "docker",
+        [
+          "exec",
+          "-it",
+          "-u",
+          "developer",
+          "-w",
+          "/workspace",
+          "-e",
+          "PORT=3000",
+          "-e",
+          "PS1=developer@coderxp-devbox:\\w\\$ ",
+          "-e",
+          "TERM=xterm-256color",
+          containerName,
+          "/bin/bash",
+          "-l",
+        ],
+        {
+          name: "xterm-256color",
+          cols: 120,
+          rows: 30,
+          cwd: "/workspace",
+          env: {
+            ...process.env,
+            TERM: "xterm-256color",
+          },
         },
-      });
+      );
 
       ptyProcess.onData((data: string) => {
         const sanitized = redactor.processChunk(data);
@@ -130,13 +150,34 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
         }
       });
     } else {
-      childProcess = spawn("docker", ["exec", "-i", "-e", "PORT=3000", containerName, "/bin/bash", "-l"], {
-        stdio: ["pipe", "pipe", "pipe"],
-        env: {
-          ...process.env,
-          TERM: "xterm-256color",
+      childProcess = spawn(
+        "docker",
+        [
+          "exec",
+          "-i",
+          "-u",
+          "developer",
+          "-w",
+          "/workspace",
+          "-e",
+          "PORT=3000",
+          "-e",
+          "PS1=developer@coderxp-devbox:\\w\\$ ",
+          "-e",
+          "TERM=xterm-256color",
+          containerName,
+          "/bin/bash",
+          "-l",
+        ],
+        {
+          stdio: ["pipe", "pipe", "pipe"],
+          cwd: "/workspace",
+          env: {
+            ...process.env,
+            TERM: "xterm-256color",
+          },
         },
-      });
+      );
 
       childProcess.stdout?.on("data", (chunk: Buffer) => {
         const raw = chunk.toString("utf8");

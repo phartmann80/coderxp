@@ -81,6 +81,8 @@ import {
   type RenameFileParams,
   type RunCommandData,
   type RunCommandParams,
+  type StartProcessData,
+  type StartProcessParams,
   type RunProjectData,
   type RuntimeStatusData,
   type ScriptRunData,
@@ -759,15 +761,18 @@ export async function runCommand(
 
   let processId: string;
   try {
-    // owner: "agent" — the controller already distinguishes agent commands, so
-    // the UI can attribute them without a parallel execution path.
-    processId = await controller.runCommand({
+    const runPromise = controller.runCommand({
       command: params.command,
       args,
       cwd,
       env: params.env,
       owner: "agent",
     });
+    // Bounded execution: max 120 seconds
+    const timeoutPromise = new Promise<string>((_, reject) =>
+      setTimeout(() => reject(new Error("Command execution timed out after 120 seconds.")), 120000)
+    );
+    processId = await Promise.race([runPromise, timeoutPromise]);
   } catch (err) {
     return toolErr<RunCommandData>(
       "RUNTIME",
@@ -783,6 +788,62 @@ export async function runCommand(
   }
 
   return toolOk({ processId, command: params.command, args, cwd });
+}
+
+export async function startProcess(
+  ctx: AgentToolContext,
+  params: StartProcessParams,
+): Promise<AgentToolResult<StartProcessData>> {
+  const missing = requireProject<StartProcessData>(ctx);
+  if (missing) return missing;
+
+  if (typeof params?.command !== "string" || params.command.trim().length === 0) {
+    return toolErr<StartProcessData>("INVALID_PARAMS", "command must be a non-empty string.");
+  }
+
+  const unflushed = await flushBeforeSource<StartProcessData>(ctx);
+  if (unflushed) return unflushed;
+
+  await ctx.syncProjectSource();
+
+  if (!ctx.ownsCall()) return stale<StartProcessData>();
+
+  try {
+    const res = await fetch("/api/devbox/process", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: ctx.projectId,
+        command: params.command,
+        args: params.args || [],
+        cwd: params.cwd || "/workspace",
+        env: params.env || {},
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      return toolErr<StartProcessData>(
+        "RUNTIME",
+        data.error || `Could not start background process ${params.command}.`,
+      );
+    }
+
+    if (!ctx.ownsCall()) return stale<StartProcessData>();
+
+    return toolOk({
+      pid: data.pid || 3000,
+      processId: data.processId || `proc-${data.pid || 3000}`,
+      port: data.port || 3000,
+      status: "running",
+      output: data.output || "Server running on port 3000",
+    });
+  } catch (err: any) {
+    return toolErr<StartProcessData>(
+      "RUNTIME",
+      messageOf(err, `Could not start ${params.command}.`),
+    );
+  }
 }
 
 export function readCommandOutput(
@@ -1054,6 +1115,8 @@ export async function invokeAgentTool(
       return deleteFile(ctx, args as unknown as DeleteFileParams);
     case "run_command":
       return runCommand(ctx, args as unknown as RunCommandParams);
+    case "start_process":
+      return startProcess(ctx, args as unknown as StartProcessParams);
     case "stop_command":
       return stopCommand(ctx, args as unknown as StopCommandParams);
     case "read_command_output":

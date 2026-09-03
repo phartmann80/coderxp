@@ -14,7 +14,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { NextRequest } from "next/server";
 
-const SESSION_COOKIE_NAME = "coderxp_session";
+const SESSION_COOKIE_NAME = "__Host-coderxp_session";
+const LEGACY_SESSION_COOKIE_NAME = "coderxp_session";
 const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 
 // Secret key for signing session cookies
@@ -251,9 +252,11 @@ export function validateRequestAuth(req: Request | NextRequest): {
 } {
   let token = "";
 
-  // 1. Check Cookie
+  // 1. Check Cookie (__Host-coderxp_session first, then legacy coderxp_session)
   if ("cookies" in req && typeof (req as NextRequest).cookies?.get === "function") {
-    const cookie = (req as NextRequest).cookies.get(SESSION_COOKIE_NAME);
+    const cookie =
+      (req as NextRequest).cookies.get(SESSION_COOKIE_NAME) ||
+      (req as NextRequest).cookies.get(LEGACY_SESSION_COOKIE_NAME);
     if (cookie?.value) {
       token = cookie.value;
     }
@@ -261,7 +264,9 @@ export function validateRequestAuth(req: Request | NextRequest): {
 
   if (!token) {
     const cookieHeader = req.headers.get("cookie") || "";
-    const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE_NAME}=([^;]+)`));
+    const match =
+      cookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE_NAME}=([^;]+)`)) ||
+      cookieHeader.match(new RegExp(`(?:^|;\\s*)${LEGACY_SESSION_COOKIE_NAME}=([^;]+)`));
     if (match) {
       token = decodeURIComponent(match[1]);
     }

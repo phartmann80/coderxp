@@ -189,12 +189,31 @@ export function useAgentTools(options: UseAgentToolsOptions): AgentToolsApi {
 
         syncProjectSource: async () => {
           if (!ownsCall()) return;
-          const runtime = getRuntime();
-          if (!runtime.isMounted()) return;
           const files = await listProjectEntries(owner);
           if (!ownsCall()) return;
-          const kind = getRuntimeKind(templateIdRef.current ?? "static-html");
-          await runtime.syncProject(files, kind);
+
+          // 1. Sync to in-browser WebContainer if mounted
+          const runtime = getRuntime();
+          if (runtime.isMounted()) {
+            const kind = getRuntimeKind(templateIdRef.current ?? "static-html");
+            await runtime.syncProject(files, kind);
+          }
+
+          // 2. Sync to Linux Devbox container /workspace
+          try {
+            const textFiles = files
+              .filter((f) => f.kind === "file" && typeof f.contents === "string")
+              .map((f) => ({ path: f.path, contents: f.contents! }));
+            if (textFiles.length > 0) {
+              await fetch("/api/devbox/fs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ projectId: owner, files: textFiles }),
+              });
+            }
+          } catch {
+            // ignore network/sync warnings
+          }
         },
 
         getRuntimeStatus: (): RuntimeStatusData => ({

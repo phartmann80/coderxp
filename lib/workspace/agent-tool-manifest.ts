@@ -239,7 +239,7 @@ export const CANONICAL_TOOL_MANIFEST: readonly CanonicalManifestTool[] = [
     name: "run_command",
     category: "command",
     risk: "execute",
-    summary: "Start a real process in the workspace container.",
+    summary: "Start a real bounded process in the workspace container (timeout <= 120s).",
     parameters: [
       { name: "command", type: "string", required: true, description: "Executable name or command." },
       { name: "args", type: "string[]", required: false, description: "List of command arguments." },
@@ -251,6 +251,30 @@ export const CANONICAL_TOOL_MANIFEST: readonly CanonicalManifestTool[] = [
       type: "object",
       properties: {
         command: { type: "string", description: "Executable or command name." },
+        args: { type: "array", items: { type: "string" }, description: "Argument list." },
+        cwd: { type: "string", description: "Working directory." },
+        env: { type: "object", description: "Environment variables." },
+      },
+      required: ["command"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "start_process",
+    category: "command",
+    risk: "execute",
+    summary: "Start a long-running web server or background process in the devbox and detect its listening port (e.g. 3000). Always use this for servers rather than run_command.",
+    parameters: [
+      { name: "command", type: "string", required: true, description: "Executable or server command, e.g. \"node server.mjs\" or \"npm start\"." },
+      { name: "args", type: "string[]", required: false, description: "List of command arguments." },
+      { name: "cwd", type: "string", required: false, description: "Working directory relative to project root." },
+      { name: "env", type: "object", required: false, description: "Environment variables map." },
+    ],
+    requiresApproval: true,
+    jsonSchema: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Server executable or command name." },
         args: { type: "array", items: { type: "string" }, description: "Argument list." },
         cwd: { type: "string", description: "Working directory." },
         env: { type: "object", description: "Environment variables." },

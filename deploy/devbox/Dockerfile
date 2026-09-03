@@ -53,8 +53,19 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Create workspace directory
-WORKDIR /workspace
+# Create developer user (uid 1000) and configure workspace
+RUN groupadd -g 1000 developer && \
+    useradd -u 1000 -g developer -m -s /bin/bash developer && \
+    mkdir -p /workspace && \
+    chown -R developer:developer /workspace /home/developer
+
+# Configure non-root developer bash prompt and clean environment (no banners)
+RUN echo 'export PS1="developer@coderxp-devbox:\w\$ "' >> /home/developer/.bashrc && \
+    echo 'export PORT=3000' >> /home/developer/.bashrc && \
+    echo 'export TERM=xterm-256color' >> /home/developer/.bashrc
+
+# Ensure no sudo access for developer
+RUN rm -f /etc/sudoers.d/* && sed -i '/%sudo/d' /etc/sudoers
 
 # Copy and install custom git credential helper for T3 enforcement
 COPY deploy/devbox/coderxp-git-credential /usr/local/bin/coderxp-git-credential
@@ -66,7 +77,8 @@ RUN git config --system init.defaultBranch main && \
     git config --system safe.directory '*' && \
     git config --system credential.helper /usr/local/bin/coderxp-git-credential
 
-# Custom banner on shell launch
-RUN echo 'echo -e "\x1b[1;34m=== CoderXP Linux Devbox (Ubuntu 24.04 / Node 24 / Python 3.12) ===\x1b[0m"' >> /root/.bashrc
+WORKDIR /workspace
+USER developer
 
 CMD ["/bin/bash"]
+

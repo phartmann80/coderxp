@@ -124,7 +124,7 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
           name: "xterm-256color",
           cols: 120,
           rows: 30,
-          cwd: "/workspace",
+          cwd: process.cwd(),
           env: {
             ...process.env,
             TERM: "xterm-256color",
@@ -171,7 +171,7 @@ wss.on("connection", async (ws: WebSocket, _req: http.IncomingMessage, projectId
         ],
         {
           stdio: ["pipe", "pipe", "pipe"],
-          cwd: "/workspace",
+          cwd: process.cwd(),
           env: {
             ...process.env,
             TERM: "xterm-256color",

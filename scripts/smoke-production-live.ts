@@ -192,6 +192,7 @@ async function main() {
 
         if (parsed.type === "output" && typeof parsed.data === "string") {
           allOutput += parsed.data;
+          console.log("[Devbox Output]", JSON.stringify(parsed.data));
 
           if (step === 1 && allOutput.includes("42")) {
             console.log("[PASS] Real arithmetic execution verified: `expr 7 * 6` -> 42");

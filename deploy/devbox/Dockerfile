@@ -54,7 +54,9 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && rm -rf /var/lib/apt/lists/*
 
 # Create developer user (uid 1000) and configure workspace
-RUN groupadd -g 1000 developer && \
+RUN (userdel -r ubuntu 2>/dev/null || true) && \
+    (groupdel ubuntu 2>/dev/null || true) && \
+    groupadd -g 1000 developer && \
     useradd -u 1000 -g developer -m -s /bin/bash developer && \
     mkdir -p /workspace && \
     chown -R developer:developer /workspace /home/developer

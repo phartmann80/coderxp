@@ -66,7 +66,7 @@ export const PERMISSION_MODE_DESCRIPTIONS: Record<AgentPermissionMode, string> =
     "Reads, edits, and commands run automatically. Deletions and renames still ask.",
 };
 
-export const DEFAULT_PERMISSION_MODE: AgentPermissionMode = "ask";
+export const DEFAULT_PERMISSION_MODE: AgentPermissionMode = "autonomous";
 
 export function isPermissionMode(value: unknown): value is AgentPermissionMode {
   return (

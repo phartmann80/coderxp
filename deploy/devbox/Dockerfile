@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tree \
     htop \
     procps \
+    iproute2 \
     ca-certificates \
     gnupg \
     lsb-release \
@@ -72,6 +73,10 @@ RUN rm -f /etc/sudoers.d/* && sed -i '/%sudo/d' /etc/sudoers
 # Copy and install custom git credential helper for T3 enforcement
 COPY deploy/devbox/coderxp-git-credential /usr/local/bin/coderxp-git-credential
 RUN chmod +x /usr/local/bin/coderxp-git-credential
+
+# Install dynamic port detector for Next.js / Vite background servers
+COPY server/detect-port.py /usr/local/bin/detect-port.py
+RUN chmod +x /usr/local/bin/detect-port.py && ln -sf /usr/local/bin/detect-port.py /usr/local/bin/detect-port
 
 # Configure default git behavior and custom credential helper script
 RUN git config --system init.defaultBranch main && \

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Preview Link API — CoderXP Live Preview
  *
  * POST /api/preview/link — create a new 128-bit preview slug
@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { validateRequestAuth } from "@/lib/server/auth";
 import { previewLinkStore } from "@/lib/server/preview-link-store";
+import { projectActivePorts } from "@/lib/server/devbox-broker";
 
 const PREVIEW_DOMAIN = process.env.PREVIEW_DOMAIN ?? "preview.coderxp.pro";
 
@@ -25,7 +26,11 @@ export async function POST(req: Request) {
     };
 
     const projectId = body.projectId || "default-project";
-    const containerPort = typeof body.containerPort === "number" ? body.containerPort : 3000;
+    const detected = projectActivePorts.get(projectId);
+    const containerPort =
+      typeof body.containerPort === "number" && body.containerPort !== 3000
+        ? body.containerPort
+        : (detected || body.containerPort || 3000);
 
     const link = previewLinkStore.create({
       projectId,

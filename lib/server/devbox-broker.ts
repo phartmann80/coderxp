@@ -548,9 +548,10 @@ class DevboxBroker extends EventEmitter {
     const envPrefix = Object.entries(env)
       .map(([k, v]) => `${k}="${v}"`)
       .join(" ");
-    const cmdWithEnv = envPrefix ? `${envPrefix} PORT=3000 ${fullCmd}` : `PORT=3000 ${fullCmd}`;
+    const cmdWithEnv = envPrefix ? `${envPrefix} ${fullCmd}` : fullCmd;
 
     if (check.noDaemon) {
+      projectActivePorts.set(projectId, 3000);
       return {
         ok: true,
         pid: 3000,
@@ -577,7 +578,31 @@ class DevboxBroker extends EventEmitter {
       const pid = parseInt(pidOut.trim(), 10) || Math.floor(Math.random() * 10000) + 1000;
       const processId = `proc-${pid}`;
 
-      await new Promise((r) => setTimeout(r, 2000));
+      let detectedPort = 3000;
+      // Poll /proc/net/tcp and /proc/<pid>/fd for up to 10 seconds (20 x 500ms)
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await new Promise((r) => setTimeout(r, 500));
+        try {
+          const { stdout: portOut } = await execFileAsync("docker", [
+            "exec",
+            "-u",
+            "0",
+            containerId,
+            "python3",
+            "/usr/local/bin/detect-port.py",
+            String(pid),
+          ]);
+          const parsed = parseInt(portOut.trim(), 10);
+          if (parsed > 0) {
+            detectedPort = parsed;
+            break;
+          }
+        } catch {
+          // Process may still be initializing or building
+        }
+      }
+
+      projectActivePorts.set(projectId, detectedPort);
 
       let logOutput = "";
       try {
@@ -592,25 +617,6 @@ class DevboxBroker extends EventEmitter {
         logOutput = logOut.slice(-2000);
       } catch {
         // ignore
-      }
-
-      let detectedPort = 3000;
-      try {
-        const { stdout: ssOut } = await execFileAsync("docker", [
-          "exec",
-          "-u",
-          "0",
-          containerId,
-          "/bin/bash",
-          "-c",
-          "ss -tulpn | grep LISTEN || true",
-        ]);
-        const portMatch = ssOut.match(/:(\d{2,5})/);
-        if (portMatch) {
-          detectedPort = parseInt(portMatch[1], 10);
-        }
-      } catch {
-        // default 3000
       }
 
       hostEventStore.recordEvent({
@@ -639,4 +645,5 @@ class DevboxBroker extends EventEmitter {
   }
 }
 
+export const projectActivePorts = new Map<string, number>();
 export const devboxBroker = new DevboxBroker();

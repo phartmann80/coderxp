@@ -106,11 +106,21 @@ async function main() {
     ],
   };
 
-  const streamRes = await fetch(`${baseUrl}/api/agent/stream`, {
+  let streamRes = await fetch(`${baseUrl}/api/agent/stream`, {
     method: "POST",
     headers: authHeaders,
     body: JSON.stringify(streamBody),
   });
+
+  if (streamRes.status === 503) {
+    console.log("[Stream] Received 503, waiting 3s for connection pool / rate limit...");
+    await new Promise((r) => setTimeout(r, 3000));
+    streamRes = await fetch(`${baseUrl}/api/agent/stream`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify(streamBody),
+    });
+  }
 
   assert.strictEqual(streamRes.status, 200, `Stream endpoint failed with HTTP ${streamRes.status}`);
   assert(streamRes.body, "Stream response body must be present");

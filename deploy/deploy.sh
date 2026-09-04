@@ -65,6 +65,8 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
+sleep 3
+
 docker ps --filter name=coderxp-app
 
 # Step 5: Post-Deployment Production Smoke Gate

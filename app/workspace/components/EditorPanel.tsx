@@ -343,9 +343,9 @@ export function EditorPanel({
           <button
             type="button"
             className="btn live-preview-btn"
-            title="Open CoderXP Live Preview in private/incognito or new window"
+            title="Live Preview is temporarily disabled on shared infrastructure pending dedicated host migration."
             onClick={handleOpenLivePreview}
-            disabled={previewLoading}
+            disabled={true}
             style={{
               display: "flex",
               alignItems: "center",
@@ -354,16 +354,16 @@ export function EditorPanel({
               padding: "0 10px",
               fontSize: 11.5,
               fontWeight: 600,
-              color: "#38bdf8",
-              backgroundColor: "rgba(56, 189, 248, 0.12)",
-              border: "1px solid rgba(56, 189, 248, 0.35)",
+              color: "#94a3b8",
+              backgroundColor: "rgba(148, 163, 184, 0.08)",
+              border: "1px solid rgba(148, 163, 184, 0.25)",
               borderRadius: 4,
-              cursor: previewLoading ? "wait" : "pointer",
-              transition: "all 0.15s ease",
+              cursor: "not-allowed",
+              opacity: 0.7,
             }}
           >
             <ExternalLink style={{ width: 12, height: 12 }} />
-            <span>{previewLoading ? "Connecting…" : "Live Preview"}</span>
+            <span>Live Preview (Disabled)</span>
           </button>
         </div>
       </div>

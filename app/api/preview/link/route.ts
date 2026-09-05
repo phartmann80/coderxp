@@ -12,8 +12,19 @@ import { previewLinkStore } from "@/lib/server/preview-link-store";
 import { projectActivePorts } from "@/lib/server/devbox-broker";
 
 const PREVIEW_DOMAIN = process.env.PREVIEW_DOMAIN ?? "preview.coderxp.pro";
+const LIVE_PREVIEW_ENABLED = process.env.LIVE_PREVIEW_ENABLED === "true";
 
 export async function POST(req: Request) {
+  if (!LIVE_PREVIEW_ENABLED) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Live preview is disabled on shared infrastructure pending dedicated host migration.",
+      },
+      { status: 503 },
+    );
+  }
+
   const auth = validateRequestAuth(req);
   if (!auth.authenticated) {
     return NextResponse.json({ ok: false, error: "Authentication required." }, { status: 401 });
